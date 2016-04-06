@@ -2741,297 +2741,366 @@ bool MagicInstance::ExecuteType3()
 	return true;
 }
 
-bool MagicInstance::ExecuteType4()
+bool MagicInstance::ExecuteType4(){
+if (pSkill == nullptr)
+return false;
+
+_MAGIC_TYPE4* pType = g_pMain->m_Magictype4Array.GetData(nSkillID);
+if (pType == nullptr)
+return false;
+
+int damage = 0;
+vector<Unit *> casted_member;
+
+
+
+
+if (!bIsRecastingSavedMagic 
+&& sTargetID >= 0 
+&& (pSkillTarget && pSkillTarget->HasSavedMagic(nSkillID)))
+return false;
+
+
+
+
+if (sTargetID == -1)
 {
-	if (pSkill == nullptr)
-		return false;
+std::vector<uint16> unitList;
 
-	_MAGIC_TYPE4* pType = g_pMain->m_Magictype4Array.GetData(nSkillID);
-	if (pType == nullptr)
-		return false;
 
-	int damage = 0;
-	vector<Unit *> casted_member;
 
-	if (!bIsRecastingSavedMagic && sTargetID >= 0 && (pSkillTarget && pSkillTarget->HasSavedMagic(nSkillID)))
-		return false;
 
-	if (sTargetID == -1)
-	{
-		std::vector<uint16> unitList;
+g_pMain->GetUnitListFromSurroundingRegions(pSkillCaster, &unitList);
+foreach (itr, unitList)
+{ 
+Unit * pTarget = g_pMain->GetUnitPtr(*itr);
 
-		g_pMain->GetUnitListFromSurroundingRegions(pSkillCaster, &unitList);
-		foreach (itr, unitList)
-		{		
-			Unit * pTarget = g_pMain->GetUnitPtr(*itr);
 
-			if(pTarget == nullptr)
-				continue; 
 
-			if (TO_USER(pSkillCaster)->isInArena() && pSkillCaster == pTarget)
-				continue;
 
-			if (pTarget->isPlayer())
-			{
-				if (TO_USER(pTarget)->isGM())
-					continue;
+if(pTarget == nullptr)
+continue; 
 
-				if (pSkillCaster->GetNation() != pTarget->GetNation() || pTarget->GetZoneID() == ZONE_ARENA)
-					TO_USER(pTarget)->RemoveStealth();
-			}
 
-			if (!pTarget->isDead() && !pTarget->isBlinking() && pTarget->isAttackable()
-				&& CMagicProcess::UserRegionCheck(pSkillCaster, pTarget, pSkill, pType->bRadius, sData[0], sData[2]))
-				casted_member.push_back(pTarget);
-		}
 
-		if (casted_member.empty())
-		{		
-			if (pSkillCaster->isPlayer())
-			{
-				if (pSkill->bMoral == MORAL_PARTY_ALL)
-					casted_member.push_back(pSkillCaster);
-				else
-				{
-					return false;
-				}
-			}
-		}
-	}
-	else 
-	{
-		// If the target was another single unit.
-		if (pSkillTarget == nullptr || pSkillTarget->isDead() || (pSkillTarget->isBlinking() && !bIsRecastingSavedMagic)) 
-			return false;
 
-		casted_member.push_back(pSkillTarget);
-	}
+if (TO_USER(pSkillCaster)->isInArena() && pSkillCaster == pTarget)
+continue;
 
-	foreach (itr, casted_member)
-	{
-		Unit * pTarget = *itr;
 
-		if(pTarget == nullptr)
-			continue;
 
-		if (pSkill->sRange > 0 && (pSkillCaster->GetDistanceSqrt(pTarget) >= (float)pSkill->sRange) && pType->bBuffType != BUFF_TYPE_HP_MP)
-			continue;
 
-		uint8 bResult = 1;
-		_BUFF_TYPE4_INFO pBuffInfo;
-		bool bAllowCastOnSelf = false;
-		uint16 sDuration = pType->sDuration;
+if (pTarget->isPlayer() && TO_USER(pTarget)->isGM())
+continue;
 
-		// Speed Skills
-		bool bSetSpeed = true;
-		uint8 nTargetSpeedAmount = pType->bSpeed;
 
-		// A handful of skills (Krowaz, currently) should use the caster as the target.
-		// As such, we should correct this before any other buff/debuff logic is handled.
-		switch (pType->bBuffType)
-		{
-		case BUFF_TYPE_UNDEAD:
-		case BUFF_TYPE_UNSIGHT:
-		case BUFF_TYPE_BLOCK_PHYSICAL_DAMAGE:
-		case BUFF_TYPE_BLOCK_MAGICAL_DAMAGE:
-			if (!pSkillCaster->isPlayer())
-				continue;
 
-			pTarget = pSkillCaster;
-			bAllowCastOnSelf = true;
-			break;
-		}
 
-		bool bBlockingDebuffs = pTarget->m_bBlockCurses;
+if (!pTarget->isDead() && !pTarget->isBlinking() && pTarget->isAttackable()
+&& CMagicProcess::UserRegionCheck(pSkillCaster, pTarget, pSkill, pType->bRadius, sData[0], sData[2]))
+casted_member.push_back(pTarget);
+}
 
-		// Skill description: Blocks all curses and has a chance to reflect the curse back onto the caster.
-		// NOTE: the exact rate is undefined, so we'll have to guess and improve later.
-		if (pType->isDebuff() && pTarget->m_bReflectCurses)
-		{
-			const short reflectChance = 25; // % chance to reflect.
-			if (CheckPercent(reflectChance * 10))
-			{
-				pTarget = pSkillCaster; // skill has been reflected, the target is now the caster.
-				bBlockingDebuffs = (pTarget->m_bBlockCurses || pTarget->m_bReflectCurses); 
-				bAllowCastOnSelf = true;
-			}
-			// Didn't reflect, so we'll just block instead.
-			else 
-			{
-				bBlockingDebuffs = true;
-			}
-		}
 
-		pTarget->m_buffLock.lock();
-		Type4BuffMap::iterator buffItr = pTarget->m_buffMap.find(pType->bBuffType);
 
-		// Identify whether or not a skill (buff/debuff) with this buff type was already cast on the player.
-		// NOTE:	Buffs will already be cast on a user when trying to recast. 
-		//			We should not error out in this case.
-		bool bSkillTypeAlreadyOnTarget = (!bIsRecastingSavedMagic && buffItr != pTarget->m_buffMap.end());
 
-		pTarget->m_buffLock.unlock();
+if (casted_member.empty())
+{ 
+if (pSkillCaster->isPlayer())
+{
+if (pSkill->bMoral == MORAL_PARTY_ALL)
+casted_member.push_back(pSkillCaster);
+else if (pSkill->bType[0] == 4)
+{
+SendSkill();
+return false;
+}
+else if (pSkill->bType[1] == 4)
+return false;
+}
+}
+}
+else 
+{
+// If the target was another single unit.
+if (pSkillTarget == nullptr 
+|| pSkillTarget->isDead() || (pSkillTarget->isBlinking() && !bIsRecastingSavedMagic)) 
+return false;
 
-		// Debuffs 'stack', in that the expiry time is reset each time.
-		// Debuffs also take precedence over buffs of the same nature, so we should ensure they get removed 
-		// rather than just stacking the modifiers, as the client only supports one (de)buff of that type active.
-		if (bSkillTypeAlreadyOnTarget && pType->isDebuff())
-		{
-			CMagicProcess::RemoveType4Buff(pType->bBuffType, pTarget, false);
-			bSkillTypeAlreadyOnTarget = false;
-		}
 
-		// If this skill is a debuff, and we are in the crossfire, 
-		// we should not bother debuffing ourselves (that would be bad!)
-		// Note that we should allow us if there's an explicit override (i.e. with Krowaz self-debuffs)
-		if (!bAllowCastOnSelf 
-			&& pType->isDebuff() && pTarget == pSkillCaster)
-			continue;
 
-		// If the user already has this buff type cast on them (debuffs should just reset the duration)
-		if ((bSkillTypeAlreadyOnTarget && pType->isBuff())
-			// or it's a curse (debuff), and we're blocking them 
-				|| (pType->isDebuff() && bBlockingDebuffs)
-				// or we couldn't grant the (de)buff...
-				|| !CMagicProcess::GrantType4Buff(pSkill, pType, pSkillCaster, pTarget, bIsRecastingSavedMagic))
-		{
-			if (sTargetID != -1 // only error out when buffing a target, otherwise we break the mass-(de)buff.
-				// Only buffs should error here, unless it's a debuff & the user's blocking it.
-					&& (pType->isBuff() || (pType->isDebuff() && bBlockingDebuffs)))
-			{
-				bResult = 0;
-				goto fail_return;
-			}
 
-			// Debuffs of any kind, or area buffs should be ignored and carry on.
-			// Usually - debuffs specifically - they correspond with attack skills which should
-			// not be reset on fail.
-			continue;
-		}
+casted_member.push_back(pSkillTarget);
+}
 
-		// Only players can store persistent skills.
-		if (nSkillID > 500000 && pTarget->isPlayer())
-		{
-			// Persisting effects will already exist in the map if we're recasting it. 
-			if (!bIsRecastingSavedMagic)
-				pTarget->InsertSavedMagic(nSkillID, pType->sDuration);
-			else
-				sDuration = pTarget->GetSavedMagicDuration(nSkillID);
-		}
 
-		if (pSkillCaster->isPlayer() && (sTargetID != -1 && pSkill->bType[0] == 4) && !pSkillCaster -> isBlinking())
-			pSkillCaster->MSpChange( -(pSkill->sMsp) );
 
-		// We do not want to reinsert debuffs into the map (which had their expiry times reset above).
-		if (!bSkillTypeAlreadyOnTarget)
-		{
-			pBuffInfo.m_nSkillID = nSkillID;
-			pBuffInfo.m_bBuffType = pType->bBuffType;
-			pBuffInfo.m_bIsBuff = pType->bIsBuff;
 
-			pBuffInfo.m_bDurationExtended = false;
-			pBuffInfo.m_tEndTime = UNIXTIME + sDuration;
+bool bSendSkillEffect = false;
+foreach (itr, casted_member)
+{
+Unit * pTarget = *itr;
 
-			// Add the buff into the buff map.
-			pTarget->AddType4Buff(pType->bBuffType, pBuffInfo);
-		}
 
-		// Speed skill posibility...
-		if (pTarget -> isPlayer() || pTarget->isNPC())
-		{
-			if ((pSkill->bMoral == MORAL_ENEMY 
-				|| pSkill->bMoral == MORAL_AREA_ENEMY) 
-				&& (pType->bBuffType == BUFF_TYPE_SPEED2 
-				|| pType->bBuffType == BUFF_TYPE_SPEED
-				|| pType->bBuffType == BUFF_TYPE_STUN))
-			{
-				uint16 nMaxRessitance = 150;
-				uint16 nTargetResistance = pType->bBuffType == BUFF_TYPE_SPEED2 ? pTarget->m_sColdR : pTarget->m_sLightningR;
 
-					if (nTargetResistance < (nMaxRessitance / 2))
-						nTargetResistance = 110;
+if(pTarget == nullptr)
+continue;
 
-					if (nTargetResistance > nMaxRessitance)
-						nMaxRessitance = nTargetResistance;
+if (pSkill->sRange > 0 && (pSkillCaster->GetDistanceSqrt(pTarget) >= (float)pSkill->sRange) && pType->bBuffType != BUFF_TYPE_HP_MP)
+continue;
 
-					if (nTargetResistance >= myrand(0, nMaxRessitance - nTargetResistance))
-						bSetSpeed = false;
+if (pTarget->isPlayer())
+{
+if ((pSkillCaster->GetNation() != pTarget->GetNation()) || TO_USER(pTarget)->isInArena())
+TO_USER(pTarget)->RemoveStealth();
+}
 
-					if (bSetSpeed)
-					{
-						_MAGIC_TYPE4 * pTypeTarget;
-						
-						Guard lock(pTarget->m_buffLock);
-						auto itr = pTarget->m_buffMap.find(BUFF_TYPE_SPEED);
-						if (itr != pTarget->m_buffMap.end() && (pTypeTarget = g_pMain->m_Magictype4Array.GetData(itr->second.m_nSkillID)))
-							nTargetSpeedAmount = pTypeTarget->bSpeed;
-					}
+uint8 bResult = 1;
+_BUFF_TYPE4_INFO pBuffInfo;
+bool bAllowCastOnSelf = false;
+uint16 sDuration = pType->sDuration;
 
-						if (!bSetSpeed)
-							goto fail_return;
-			}
-		}
+// Speed Skills
+bool bSetSpeed = true;
+uint8 nTargetSpeedAmount = pType->bSpeed;
 
-		// Update character stats.
-		if (pTarget->isPlayer())
-		{
-			TO_USER(pTarget)->SetUserAbility();
-			TO_USER(pTarget)->Send2AI_UserUpdateInfo();
+// A handful of skills (Krowaz, currently) should use the caster as the target.
+// As such, we should correct this before any other buff/debuff logic is handled.
+switch (pType->bBuffType)
+{
+//case BUFF_TYPE_UNDEAD:
+//case BUFF_TYPE_UNSIGHT:
+case BUFF_TYPE_BLOCK_PHYSICAL_DAMAGE:
+case BUFF_TYPE_BLOCK_MAGICAL_DAMAGE:
+{
+if (!pSkillCaster->isPlayer() && pSkillCaster->GetZoneID() != ZONE_CHAOS_DUNGEON)
+continue;
+pTarget = pSkillCaster;
+bAllowCastOnSelf = true;
+}
+break;
+}
 
-			if (pType->isBuff() && pType->bBuffType == BUFF_TYPE_HP_MP)
-				TO_USER(pTarget)->HpChange(pTarget->m_sMaxHPAmount);
-		}
-		/*else
-		{
-			TO_NPC(pTarget)->Send2AI_NpcUpdateInfo();
+bool bBlockingDebuffs = pTarget->m_bBlockCurses;
 
-			if (pType->isBuff() && pType->bBuffType == BUFF_TYPE_HP_MP)
-				TO_NPC(pTarget)->HpChange(pTarget->m_sMaxHPAmount);
-		}*/
+// Skill description: Blocks all curses and has a chance to reflect the curse back onto the caster.
+// NOTE: the exact rate is undefined, so we'll have to guess and improve later.
+if (pType->isDebuff() && pTarget->m_bReflectCurses)
+{
+const short reflectChance = 25; // % chance to reflect.
+if (CheckPercent(reflectChance * 10))
+{
+pTarget = pSkillCaster; // skill has been reflected, the target is now the caster.
+bBlockingDebuffs = (pTarget->m_bBlockCurses || pTarget->m_bReflectCurses); 
+bAllowCastOnSelf = true;
+}
+// Didn't reflect, so we'll just block instead.
+else 
+{
+bBlockingDebuffs = true;
+}
+}
+
+pTarget->m_buffLock.lock();
+Type4BuffMap::iterator buffItr = pTarget->m_buffMap.find(pType->bBuffType);
+
+// Identify whether or not a skill (buff/debuff) with this buff type was already cast on the player.
+// NOTE: Buffs will already be cast on a user when trying to recast. 
+// We should not error out in this case.
+bool bSkillTypeAlreadyOnTarget = (!bIsRecastingSavedMagic && buffItr != pTarget->m_buffMap.end());
+
+pTarget->m_buffLock.unlock();
+
+// Debuffs 'stack', in that the expiry time is reset each time.
+// Debuffs also take precedence over buffs of the same nature, so we should ensure they get removed 
+// rather than just stacking the modifiers, as the client only supports one (de)buff of that type active.
+if (bSkillTypeAlreadyOnTarget && pType->isDebuff())
+{
+CMagicProcess::RemoveType4Buff(pType->bBuffType, pTarget, false);
+bSkillTypeAlreadyOnTarget = false;
+}
+// If this skill is a debuff, and we are in the crossfire, 
+// we should not bother debuffing ourselves (that would be bad!)
+// Note that we should allow us if there's an explicit override (i.e. with Krowaz self-debuffs)
+if (!bAllowCastOnSelf 
+&& pType->isDebuff() && pTarget == pSkillCaster)
+continue;
+
+// If the user already has this buff type cast on them (debuffs should just reset the duration)
+if ((bSkillTypeAlreadyOnTarget && pType->isBuff())
+// or it's a curse (debuff), and we're blocking them 
+|| (pType->isDebuff() && bBlockingDebuffs)
+// or we couldn't grant the (de)buff...
+|| !CMagicProcess::GrantType4Buff(pSkill, pType, pSkillCaster, pTarget, bIsRecastingSavedMagic))
+{
+if (sTargetID != -1 // only error out when buffing a target, otherwise we break the mass-(de)buff.
+// Only buffs should error here, unless it's a debuff & the user's blocking it.
+&& (pType->isBuff() || (pType->isDebuff() && bBlockingDebuffs)))
+{
+bResult = 0;
+goto fail_return;
+}
+
+// Debuffs of any kind, or area buffs should be ignored and carry on.
+// Usually - debuffs specifically - they correspond with attack skills which should
+// not be reset on fail.
+continue;
+}
+
+
+// Only players can store persistent skills.
+if (nSkillID > 500000 && pTarget->isPlayer())
+{
+// Persisting effects will already exist in the map if we're recasting it. 
+if (!bIsRecastingSavedMagic)
+pTarget->InsertSavedMagic(nSkillID, (uint32)pType->sDuration);
+else
+sDuration = (uint16)pTarget->GetSavedMagicDuration(nSkillID);
+}
+
+if (pSkillCaster->isPlayer() && sTargetID != -1 && pSkill->bType[0] == 4)
+pSkillCaster->MSpChange( -(pSkill->sMsp) );
+
+// We do not want to reinsert debuffs into the map (which had their expiry times reset above).
+if (!bSkillTypeAlreadyOnTarget)
+{
+pBuffInfo.m_nSkillID = nSkillID;
+pBuffInfo.m_bBuffType = pType->bBuffType;
+pBuffInfo.m_bIsBuff = pType->bIsBuff;
+
+pBuffInfo.m_bDurationExtended = false;
+pBuffInfo.m_tEndTime = UNIXTIME + sDuration;
+
+// Add the buff into the buff map.
+pTarget->AddType4Buff(pType->bBuffType, pBuffInfo);
+}
+
+if (pTarget -> isPlayer())
+{
+if ((pSkill->bMoral == MORAL_ENEMY 
+|| pSkill->bMoral == MORAL_AREA_ENEMY) 
+&& (pType->bBuffType == BUFF_TYPE_SPEED2 
+|| pType->bBuffType == BUFF_TYPE_SPEED
+|| pType->bBuffType == BUFF_TYPE_STUN))
+{
+if (pSkill->bSuccessRate < 100 && pSkill->bSuccessRate <= myrand(0, (100 - pSkill->bSuccessRate) * 10))
+bSetSpeed = false;
+// Calculate user ressistance...
+else
+{
+if (pSkillCaster->isPlayer())
+{
+if (pSkill->iNum == 490220)
+{
+if (2 >= myrand(0, 4))
+bSetSpeed = false;
+}
+else
+{
+if (!TO_USER(pTarget)->isMagicEffected(TO_USER(pSkillCaster), pSkill->iNum))
+bSetSpeed = false;
+}
+}
+else
+{
+uint16 nMaxRessitance = 250;
+uint16 nTargetResistance = pType->bBuffType == BUFF_TYPE_SPEED2 ? pTarget->m_sColdR : pTarget->m_sLightningR;
+
+if (nTargetResistance < (nMaxRessitance / 2))
+nTargetResistance = 110;
+
+if (nTargetResistance > nMaxRessitance)
+nMaxRessitance = nTargetResistance;
+
+if (nTargetResistance >= myrand(0, nMaxRessitance - nTargetResistance))
+bSetSpeed = false;
+}
+
+if (bSetSpeed && pType->bBuffType == BUFF_TYPE_SPEED2)
+{
+_MAGIC_TYPE4 * pTypeTarget;
+Guard lock(pTarget->m_buffLock);
+auto itr = pTarget->m_buffMap.find(BUFF_TYPE_SPEED2);
+if (itr != pTarget->m_buffMap.end() && (pTypeTarget = g_pMain->m_Magictype4Array.GetData(itr->second.m_nSkillID)))
+nTargetSpeedAmount = pTypeTarget->bSpeed;
+}
+if (!bSetSpeed)
+goto fail_return;
+}
+}
+}
+
+
+// Update character stats.
+if (pTarget->isPlayer())
+{
+TO_USER(pTarget)->SetUserAbility();
+TO_USER(pTarget)->Send2AI_UserUpdateInfo();
+
+if (pType->isBuff() && pType->bBuffType == BUFF_TYPE_HP_MP)
+TO_USER(pTarget)->HpChange(pTarget->m_sMaxHPAmount);
+}
+
 
 fail_return:
-		if (pSkill->bType[1] == 0 || pSkill->bType[1] == 4)
-		{
-			Unit *pTmp = (pSkillCaster->isPlayer() ? pSkillCaster : pTarget);
-			int16 sDataCopy[] = 
-			{
-				sData[0], bResult, sData[2], sDuration,
-				sData[4], pType->bSpeed, sData[6]
-			};
+if (pSkill->bType[1] == 0 || pSkill->bType[1] == 4)
+{
+Unit *pTmp = (pSkillCaster->isPlayer() ? pSkillCaster : pTarget);
+int16 sDataCopy[] = 
+{
+sData[0], bResult, sData[2], sDuration,
+sData[4], pType->bSpeed, sData[6]
+}; 
 
-			if (!bSetSpeed)
-			{
-				if (pSkill->bMoral == MORAL_ENEMY)
-					SendSkillNotEffect();
-				else if (pSkill->bMoral != MORAL_ENEMY)
-				{
-					sDataCopy[1] = 0;
-					BuildAndSendSkillPacket(pTmp, true, sCasterID, pTarget->GetID(), bOpcode, nSkillID, sDataCopy);
-				}
-			}
 
-			else
-				BuildAndSendSkillPacket(pTmp, true, sCasterID, pTarget->GetID(), bOpcode, nSkillID, sDataCopy);
 
-			if ((pSkill->bMoral >= MORAL_ENEMY || pSkill->bMoral >= MORAL_AREA_ENEMY) && pTarget->isPlayer())
-			{
-				UserStatus status = USER_STATUS_POISON;
-				if (pType->bBuffType == BUFF_TYPE_SPEED || pType->bBuffType == BUFF_TYPE_SPEED2)
-					status = USER_STATUS_SPEED;
 
-				TO_USER(pTarget)->SendUserStatusUpdate(status, USER_STATUS_INFLICT);
-			}
-
-			if (pType->bBuffType == BUFF_TYPE_DECREASE_RESIST
-				|| pType->bBuffType == BUFF_TYPE_DISABLE_TARGETING)
-				SendSkill();
-		}
-
-		if (bResult == 0 && pSkillCaster->isPlayer())
-			SendSkillFailed((*itr)->GetID());
-	}
-	return true;
+if (!bSetSpeed)
+{
+if (pSkill->bMoral == MORAL_ENEMY)
+SendSkillNotEffect();
+else
+{
+sDataCopy[1] = 0;
+BuildAndSendSkillPacket(pTmp, true, sCasterID, pTarget->GetID(), bOpcode, nSkillID, sDataCopy);
 }
+}
+else if (pType->bBuffType != BUFF_TYPE_DECREASE_RESIST && pType->bBuffType != BUFF_TYPE_DISABLE_TARGETING && pType->bBuffType != BUFF_TYPE_AC && pType->bBuffType != BUFF_TYPE_DAMAGE)
+BuildAndSendSkillPacket(pTmp, true, sCasterID, pTarget->GetID(), bOpcode, nSkillID, sDataCopy);
+else if ((pType->bBuffType == BUFF_TYPE_AC || pType->bBuffType == BUFF_TYPE_DAMAGE) && pSkill->bMoral != MORAL_AREA_ENEMY)
+BuildAndSendSkillPacket(pTmp, true, sCasterID, pTarget->GetID(), bOpcode, nSkillID, sDataCopy);
+
+
+
+if ((pSkill->bMoral >= MORAL_ENEMY || pSkill->bMoral >= MORAL_AREA_ENEMY)
+&& pTarget->isPlayer())
+{
+UserStatus status = USER_STATUS_POISON;
+if (pType->bBuffType == BUFF_TYPE_SPEED || pType->bBuffType == BUFF_TYPE_SPEED2)
+status = USER_STATUS_SPEED;
+
+TO_USER(pTarget)->SendUserStatusUpdate(status, USER_STATUS_INFLICT);
+}
+
+if (pType->bBuffType == BUFF_TYPE_DECREASE_RESIST
+|| pType->bBuffType == BUFF_TYPE_DISABLE_TARGETING || ((pType->bBuffType == BUFF_TYPE_AC || pType->bBuffType == BUFF_TYPE_DAMAGE) && pSkill->bMoral == MORAL_AREA_ENEMY))
+{
+BuildAndSendSkillPacket(pTmp, true, sCasterID, (*itr)->GetID(), bOpcode, nSkillID, sDataCopy);
+if (!bSendSkillEffect)
+{
+bSendSkillEffect = true;
+SendSkill();
+}
+}
+}
+
+if (bResult == 0
+&& pSkillCaster->isPlayer())
+SendSkillFailed((*itr)->GetID());
+}
+return true;
+}
+
 
 bool MagicInstance::ExecuteType5()
 {
