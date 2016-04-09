@@ -3,7 +3,6 @@
 
 void CUser::QuestDataRequest()
 {
-	// Sending this now is probably wrong, but it's cleaner than it was before.
 	Packet result(WIZ_QUEST, uint8(1));
 	result << uint16(m_questMap.size());
 	foreach (itr, m_questMap)
@@ -18,52 +17,60 @@ void CUser::QuestV2PacketProcess(Packet & pkt)
 
 	CNpc *pNpc = g_pMain->GetNpcPtr(m_sEventNid);
 	_QUEST_HELPER * pQuestHelper = g_pMain->m_QuestHelperArray.GetData(nQuestID);
-	// Does this quest helper exist?
-	if (pQuestHelper == nullptr)
-		return;
 
-	// If we're the same min. level as the quest requires, 
-	// do we have the min. required XP? Seems kind of silly, but OK..
+	if(5 != opcode){ 
+		if(pQuestHelper == nullptr
+			|| pNpc == nullptr
+			|| pNpc->isDead()
+			|| GetZoneID() != pQuestHelper->bZone
+			|| pQuestHelper->sNpcId != pNpc->GetProtoID()
+			|| m_sEventNid < 0
+			|| !isInRange(pNpc, MAX_NPC_RANGE))  
+			return;
+	}
+
+	if (pQuestHelper == nullptr
+		|| (pQuestHelper->bNation != 3 && pQuestHelper->bNation != GetNation())
+		|| (pQuestHelper->bLevel > GetLevel())
+		|| (pQuestHelper->bClass != 5 && !JobGroupCheck(pQuestHelper->bClass)))
+			return;
+
 	if (pQuestHelper->bLevel == GetLevel() && pQuestHelper->nExp > m_iExp)
 		return;
 
-	switch (opcode)
-	{
-	case 3:
-	case 7:
-		QuestV2ExecuteHelper(pQuestHelper);
-		QuestV2MonsterDataRequest();
-		break;
-
-	case 4:
-		QuestV2CheckFulfill(pQuestHelper);
-		break;
-
-	case 5:
-		if (!CheckExistEvent(pQuestHelper->sEventDataIndex, 2))
-			SaveEvent(pQuestHelper->sEventDataIndex, 4);
-
-		if (m_sEventDataIndex > 0 && m_sEventDataIndex == pQuestHelper->sEventDataIndex)
-		{
-			QuestV2MonsterDataDeleteAll();
+	printf("quest opcode num:%d\n",opcode);
+	switch (opcode) {
+		case 3:
+		case 7:
+			QuestV2ExecuteHelper(pQuestHelper);
 			QuestV2MonsterDataRequest();
-		}
+			break;
+		case 4:
+			QuestV2CheckFulfill(pQuestHelper);
+			break;
+		case 5:
+			if (!CheckExistEvent(pQuestHelper->sEventDataIndex, 2))
+				SaveEvent(pQuestHelper->sEventDataIndex, 4);
 
-		// Kick the user out of the quest zone.
-		// Monster suppression squad is the only zone I'm aware of that this should apply to.
-		if (GetZoneID() >= 81 && GetZoneID() <= 83)
-			KickOutZoneUser(true);
-		break;
+			if (m_sEventDataIndex > 0 && m_sEventDataIndex == pQuestHelper->sEventDataIndex) {
+				QuestV2MonsterDataDeleteAll();
+				QuestV2MonsterDataRequest();
+			}
 
-	case 6:
-		if (!CheckExistEvent(pQuestHelper->sEventDataIndex, 2))
-			SaveEvent(pQuestHelper->sEventDataIndex, 1);
-		break;
-
-	case 12:
-		if (!CheckExistEvent(pQuestHelper->sEventDataIndex, 3))
-			SaveEvent(pQuestHelper->sEventDataIndex, 1);
-		break;
+			if (GetZoneID() >= 81 && GetZoneID() <= 83)
+				KickOutZoneUser(true);
+			break;
+		case 6:
+			if (!CheckExistEvent(pQuestHelper->sEventDataIndex, 2))
+				SaveEvent(pQuestHelper->sEventDataIndex, 1);
+			break;
+		case 12:
+			if (!CheckExistEvent(pQuestHelper->sEventDataIndex, 3))
+				SaveEvent(pQuestHelper->sEventDataIndex, 1);
+			break;
+		default:
+			printf("uncatched num:%d\n",opcode);
+			break;
 	}
 }
 
@@ -76,7 +83,6 @@ void CUser::SaveEvent(uint16 sQuestID, uint8 bQuestState)
 
 	m_questMap[sQuestID] = bQuestState;
 
-	// Don't need to handle special/kill quests any further
 	if (sQuestID >= QUEST_KILL_GROUP1)
 		return;
 
@@ -84,15 +90,12 @@ void CUser::SaveEvent(uint16 sQuestID, uint8 bQuestState)
 	result << sQuestID << bQuestState;
 	Send(&result);
 
-	if (m_sEventDataIndex == sQuestID && bQuestState == 2)
-	{
+	if (m_sEventDataIndex == sQuestID && bQuestState == 2) {
 		QuestV2MonsterDataDeleteAll();
 		QuestV2MonsterDataRequest();
 	}
 
-	if (bQuestState == 1 && pQuestMonster != nullptr)
-	{
-		// TODO: Decipher this into more meaningful code.
+	if (bQuestState == 1 && pQuestMonster != nullptr) {
 		int16 v11 = ((int16)((uint32)(6711 * sQuestID) >> 16) >> 10) - (sQuestID >> 15);
 		int16 v12 = ((int16)((uint32)(5243 * (int16)(sQuestID - 10000 * v11)) >> 16) >> 3) - ((int16)(sQuestID - 10000 * v11) >> 15);
 
@@ -112,132 +115,58 @@ void CUser::DeleteEvent(uint16 sQuestID)
 
 bool CUser::CheckExistEvent(uint16 sQuestID, uint8 bQuestState)
 {
-	// Attempt to find a quest with that ID in the map
 	QuestMap::iterator itr = m_questMap.find(sQuestID);
-
-	// If it doesn't exist, it doesn't exist. 
-	// Unless of course, we wanted it to not exist, in which case we're right!
-	// (this does seem silly, but this behaviour is STILL expected, so do not remove it.)
 	if (itr == m_questMap.end())
 		return bQuestState == 0;
 
-		return itr->second == bQuestState;
+	return itr->second == bQuestState;
 }
 
-/*void CUser::QuestV2MonsterCountAdd(uint16 sNpcID)
+void CUser::QuestV2MonsterCountAdd(uint16 sNpcID)
 {
 	if (m_sEventDataIndex == 0)
 		return;
 
-	// it looks like they use an active quest ID which is kind of dumb
-	// we'd rather search through the player's active quests for applicable mob counts to increment
-	// but then, this system can't really handle that (static counts). More research is necessary.
-	uint16 sQuestNum = m_sEventDataIndex; // placeholder so that we can implement logic mockup
+	uint16 sQuestNum = m_sEventDataIndex;
 	_QUEST_MONSTER *pQuestMonster = g_pMain->m_QuestMonsterArray.GetData(sQuestNum);
-	
 	if (pQuestMonster == nullptr)
 		return;
 
-	// TODO: Implement obscure zone ID logic
-	for (int group = 0; group < QUEST_MOB_GROUPS; group++)
-	{
-		for (int i = 0; i < QUEST_MOBS_PER_GROUP; i++)
-		{
+	for (int group = 0; group < QUEST_MOB_GROUPS; group++) {
+		for (int i = 0; i < QUEST_MOBS_PER_GROUP; i++) {
 			if (pQuestMonster->sNum[group][i] != sNpcID)
 				continue;		
-
-			if (m_bKillCounts[group] + 1 > pQuestMonster->sCount[group])
-				return;
 
 			m_bKillCounts[group]++;
 			SaveEvent(QUEST_KILL_GROUP1 + group, m_bKillCounts[group]);
 
 			Packet result(WIZ_QUEST, uint8(9));
-			result << uint8(2) << uint16(sQuestNum) << uint8(group + 1) << uint16(m_bKillCounts[group]);
+			result << uint8(2) << uint16(sQuestNum) << uint8(1) << uint16(m_bKillCounts[group]);
 			Send(&result);
 
-			if (m_bKillCounts[group] >=  pQuestMonster->sCount[group]) //kapanis kosullari
-			{
+			if (m_bKillCounts[group] >=  pQuestMonster->sCount[group]) {
 				uint8 bQuestState = 3;
-				SaveEvent(sQuestNum, bQuestState); //sabit numara
+				SaveEvent(sQuestNum, bQuestState);
 				Quest_Moster_Couner_Map::iterator itr  = m_quest_moster_map.find(sQuestNum);
-				if(itr == m_quest_moster_map.end()){
-					m_quest_moster_map.insert(std::make_pair(sQuestNum,m_bKillCounts[group]));
-				}
-				else
-				{
-					itr->second = m_bKillCounts[group];
-				}
-			}	return;
-		}
-	}
-}*/
-
-void CUser::QuestV2MonsterCountAdd(uint16 sNpcID)
-{
-	// DüslerinSokağı Cana Teşekkürler..
-	if (m_sEventDataIndex == 0)
-		return;
-
-	// it looks like they use an active quest ID which is kind of dumb
-	// we'd rather search through the player's active quests for applicable mob counts to increment
-	// but then, this system can't really handle that (static counts). More research is necessary.
-	uint16 sQuestNum = m_sEventDataIndex; // placeholder so that we can implement logic mockup
-	_QUEST_MONSTER *pQuestMonster = g_pMain->m_QuestMonsterArray.GetData(sQuestNum);
-	
-	if (pQuestMonster == nullptr)
-		return;
-
-	// TODO: Implement obscure zone ID logic
-	for (int Count = 0; Count < QUEST_MOB_GROUPS; Count++)
-	{
-		for (int i = 0; i < QUEST_MOBS_PER_GROUP; i++)
-		{
-			if (pQuestMonster->sNum[Count][i] != sNpcID)
-				continue;		
-
-			if (m_bKillCounts[Count] + 1 > pQuestMonster->sCount[Count])
-				return;
-
-			m_bKillCounts[Count]++;
-			SaveEvent(QUEST_KILL_GROUP1 + Count, m_bKillCounts[Count]);
-
-			Packet result(WIZ_QUEST, uint8(9));
-			result << uint8(2) << uint16(sQuestNum) << uint8(Count + 1) << uint16(m_bKillCounts[Count]);
-			Send(&result);
-
-			if (m_bKillCounts[Count] >= pQuestMonster->sCount[Count]) //kapanis kosullari
-			{
-				uint8 bQuestState = 3;
-				SaveEvent(QUEST_KILL_GROUP1 + Count, bQuestState); //sabit numara
-				Quest_Moster_Couner_Map::iterator itr = m_quest_moster_map.find(sQuestNum);
 				if(itr == m_quest_moster_map.end())
-				{
-					m_quest_moster_map.insert(std::make_pair(sQuestNum,m_bKillCounts[Count]));
-				}
+					m_quest_moster_map.insert(std::make_pair(sQuestNum,m_bKillCounts[group]));
 				else
-				{
-					itr->second = m_bKillCounts[Count];
-				}
-			}	return;
+					itr->second = m_bKillCounts[group];
+			}
+			return;
 		}
 	}
 }
 
 uint8 CUser::QuestV2CheckMonsterCount(uint16 sQuestID)
 {
-	if (sQuestID >= QUEST_KILL_GROUP1)
-	{
+	if (sQuestID >= QUEST_KILL_GROUP1) {
 		QuestMap::iterator itr = m_questMap.find(sQuestID);
-
-		// If it doesn't exist, it doesn't exist. 
 		if (itr == m_questMap.end())
 			return 0;
-
+		
 		return itr->second;	
-	}
-	else
-	{
+	} else {
 		Quest_Moster_Couner_Map::iterator itr  = m_quest_moster_map.find(sQuestID);
 		if(itr == m_quest_moster_map.end())
 			return 0;
@@ -260,13 +189,11 @@ void CUser::QuestV2MonsterDataRequest()
 {
 	Packet result(WIZ_QUEST, uint8(9));
 
-	// Still not sure, but it's generating an ID.
 	m_sEventDataIndex = 
 		10000	*	QuestV2CheckMonsterCount(32005) +
 		100		*	QuestV2CheckMonsterCount(32006) +
-					QuestV2CheckMonsterCount(32007);
+		QuestV2CheckMonsterCount(32007);
 
-	// Lookup the current kill counts for each mob group in the active quest
 	m_bKillCounts[0] = QuestV2CheckMonsterCount(QUEST_KILL_GROUP1);
 	m_bKillCounts[1] = QuestV2CheckMonsterCount(QUEST_KILL_GROUP2);
 	m_bKillCounts[2] = QuestV2CheckMonsterCount(QUEST_KILL_GROUP3);
@@ -274,18 +201,18 @@ void CUser::QuestV2MonsterDataRequest()
 
 	result	<< uint8(1)
 			<< m_sEventDataIndex
-			<< uint16(m_bKillCounts[0]) << uint16(m_bKillCounts[1])
-			<< uint16(m_bKillCounts[2]) << uint16(m_bKillCounts[3]);
+			<< m_bKillCounts[0] << m_bKillCounts[1]
+			<< m_bKillCounts[2] << m_bKillCounts[3];
 
 	Send(&result);
 }
 
 void CUser::QuestV2ExecuteHelper(_QUEST_HELPER * pQuestHelper)
 {
-	if (pQuestHelper == nullptr && pQuestHelper->bQuestType != 3) //görev verme sorunu
+	if (pQuestHelper == nullptr && pQuestHelper->bQuestType != 3)
 		return;
 
-	QuestV2RunEvent(pQuestHelper, pQuestHelper->nEventTriggerIndex); // NOTE: Fulfill will use nEventCompleteIndex
+	QuestV2RunEvent(pQuestHelper, pQuestHelper->nEventTriggerIndex);
 }
 
 void CUser::QuestV2CheckFulfill(_QUEST_HELPER * pQuestHelper)
@@ -296,42 +223,30 @@ void CUser::QuestV2CheckFulfill(_QUEST_HELPER * pQuestHelper)
 	QuestV2RunEvent(pQuestHelper, pQuestHelper->nEventCompleteIndex);
 }
 
-bool CUser::QuestV2RunEvent(_QUEST_HELPER * pQuestHelper, uint32 nEventID, int8 bSelectedReward)
+bool CUser::QuestV2RunEvent(_QUEST_HELPER * pQuestHelper, uint32 nEventID, int8 bSelectedReward /*= -1*/)
 {
-	// Lookup the corresponding NPC.
 	if (pQuestHelper->strLuaFilename == "01_main.lua")
-	{
 		m_sEventNid = 10000;
-	}
 
 	CNpc * pNpc = g_pMain->GetNpcPtr(m_sEventNid);
 	bool result = false;
 
-	// Make sure the NPC exists and is not dead (we should also check if it's in range)
 	if (pNpc == nullptr || pNpc->isDead())
 		return result;
 
-	// Increase the NPC's reference count to ensure it doesn't get freed while executing a script
 	pNpc->IncRef();
 
 	m_nQuestHelperID = pQuestHelper->nIndex;
-	result = g_pMain->GetLuaEngine()->ExecuteScript(this, pNpc, nEventID, bSelectedReward, 
-		pQuestHelper->strLuaFilename.c_str());
+	result = g_pMain->GetLuaEngine()->ExecuteScript(this, pNpc, nEventID, bSelectedReward, pQuestHelper->strLuaFilename.c_str());
 
-	// Decrease it now that we've finished with it + free if necessary
 	pNpc->DecRef();
 
 	return result;
 }
 
-/* 
-These are called by quest scripts. 
-*/
-
 void CUser::QuestV2SaveEvent(uint16 sQuestID)
 {
 	_QUEST_HELPER * pQuestHelper = g_pMain->m_QuestHelperArray.GetData(sQuestID);
-	
 	if (pQuestHelper == nullptr)
 		return;
 
@@ -348,15 +263,12 @@ void CUser::QuestV2SendNpcMsg(uint32 nQuestID, uint16 sNpcID)
 void CUser::QuestV2ShowGiveItem(uint32 nUnk1, uint32 sUnk1, 
 								uint32 nUnk2, uint32 sUnk2,
 								uint32 nUnk3, uint32 sUnk3,
-								uint32 nUnk4, uint32 sUnk4,
-								uint32 nUnk5, uint32 sUnk5)
-{
+								uint32 nUnk4, uint32 sUnk4) {
 	Packet result(WIZ_QUEST, uint8(10));
 	result	<< nUnk1 << sUnk1
-			<< nUnk2 << sUnk2
-			<< nUnk3 << sUnk3
-			<< nUnk4 << sUnk4
-			<< nUnk5 << sUnk5;
+		<< nUnk2 << sUnk2
+		<< nUnk3 << sUnk3
+		<< nUnk4 << sUnk4;
 	Send(&result);
 }
 
@@ -364,26 +276,23 @@ uint16 CUser::QuestV2SearchEligibleQuest(uint16 sNpcID)
 {
 	Guard lock(g_pMain->m_questNpcLock);
 	QuestNpcList::iterator itr = g_pMain->m_QuestNpcList.find(sNpcID);
-	
 	if (itr == g_pMain->m_QuestNpcList.end() || itr->second.empty())
 		return 0;
 
-	// Loop through all the QuestHelper instances attached to that NPC.
-	foreach (itr2, itr->second)
-	{
+	foreach (itr2, itr->second) {
 		_QUEST_HELPER * pHelper = (*itr2);
 		if (pHelper->bLevel > GetLevel()
 			|| (pHelper->bLevel == GetLevel() && pHelper->nExp > m_iExp)
 			|| (pHelper->bClass != 5 && !JobGroupCheck(pHelper->bClass))
 			|| (pHelper->bNation != 3 && pHelper->bNation != GetNation())
 			|| (pHelper->sEventDataIndex == 0)
-			|| (pHelper->bEventStatus < 0 || CheckExistEvent(pHelper->sEventDataIndex, 2)) //gorev tamamlanmamis ise
-			|| !CheckExistEvent(pHelper->sEventDataIndex, pHelper->bEventStatus)) //gorev tamamlanma kontrolu
+			|| (pHelper->bEventStatus < 0 || CheckExistEvent(pHelper->sEventDataIndex, 2))
+			|| !CheckExistEvent(pHelper->sEventDataIndex, pHelper->bEventStatus))
 			continue;
 
 		return 2;
 	}
-		return 0;
+	return 0;
 }
 
 void CUser::QuestV2ShowMap(uint32 nQuestHelperID)
@@ -396,7 +305,6 @@ void CUser::QuestV2ShowMap(uint32 nQuestHelperID)
 uint8 CUser::CheckMonsterCount(uint8 bGroup)
 {
 	_QUEST_MONSTER * pQuestMonster = g_pMain->m_QuestMonsterArray.GetData(m_sEventDataIndex);
-	
 	if (pQuestMonster == nullptr || bGroup == 0 || bGroup >= QUEST_MOB_GROUPS)
 		return 0;
 
@@ -519,12 +427,11 @@ uint8 CUser::GetClanRank()
 	return pClan->m_byFlag;
 }
 
-uint8 CUser::GetBeefRoastVictory()
-{
+uint8 CUser::GetBeefRoastVictory() {
 	if( g_pMain->m_sBifrostTime <= 90 * MINUTE && g_pMain->m_BifrostVictory != ALL )
 		return g_pMain->m_sBifrostVictoryAll; 
-		else
-			return g_pMain->m_BifrostVictory; 
+	else
+		return g_pMain->m_BifrostVictory; 
 }
 
 uint8 CUser::GetWarVictory() { return g_pMain->m_bVictory; }
@@ -534,5 +441,4 @@ uint8 CUser::CheckMiddleStatueCapture() { return g_pMain->m_bMiddleStatueNation 
 void CUser::MoveMiddleStatue() { Warp((GetNation() == KARUS ? DODO_CAMP_WARP_X : LAON_CAMP_WARP_X) + myrand(0, DODO_LAON_WARP_RADIUS),(GetNation() == KARUS ? DODO_CAMP_WARP_Z : LAON_CAMP_WARP_Z) + myrand(0, DODO_LAON_WARP_RADIUS)); }
 
 uint8 CUser::GetPVPMonumentNation() { return g_pMain->m_nPVPMonumentNation[GetZoneID()]; }
-
 uint8 CUser::GetEventMonumentNation() { return g_pMain->m_nEventMonumentNation[GetZoneID()]; }
