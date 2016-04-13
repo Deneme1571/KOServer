@@ -1,4 +1,4 @@
-#include "stdafx.h"
+CheckNationMonumentRewards#include "stdafx.h"
 #include "KingSystem.h"
 #include "KnightsManager.h"
 
@@ -4437,13 +4437,14 @@ bool CGameServerDlg::CastleSiegeWarAttack(CUser *pUser, CUser *pTargetUser)
 	}
 		return false;
 }
+
 void CGameServerDlg::CheckNationMonumentRewards()
 {
-	std::vector<uint16> deleted;
+	/*std::vector<uint16> deleted;
 
 	foreach_stlmap (itr, m_NationMonumentInformationArray)
 	{
-		if (int32(UNIXTIME) - itr->second->RepawnedTime < NATION_MONUMENT_REWARD_SECOND)
+		if (int32(UNIXTIME) - itr->second->RepawnedTime < 20)
 			continue;
 
 		CNpc *pNpc = GetNpcPtr(itr->second->sNid);
@@ -4483,6 +4484,52 @@ void CGameServerDlg::CheckNationMonumentRewards()
 			Announcement(DECLARE_NATION_REWARD_STATUS, Nation::ALL, itr->second->sSid, nullptr, pNpc);
 			ShowNpcEffect(itr->second->sNid,20100,pNpc->GetZoneID());
 		}
+	}
+
+	foreach (itr, deleted)
+		g_pMain->m_NationMonumentInformationArray.DeleteData(*itr);*/
+	std::vector<uint16> deleted;
+
+	foreach_stlmap (itr, m_NationMonumentInformationArray)
+	{
+		if (int32(UNIXTIME) - itr->second->RepawnedTime < NATION_MONUMENT_REWARD_SECOND)
+			continue;
+
+		CNpc *pNpc = GetNpcPtr(itr->second->sNid);
+
+		if (pNpc == nullptr)
+			continue;
+
+		uint16 nTrapNumber = pNpc->GetZoneID() == ZONE_KARUS ?  itr->second->sSid - LUFERSON_MONUMENT_SID : itr->second->sSid - ELMORAD_MONUMENT_SID;
+
+		std::vector<Unit *> distributed_member;
+		std::vector<uint16> unitList;
+		g_pMain->GetUnitListFromSurroundingRegions(pNpc, &unitList);
+
+		foreach (itrx, unitList)
+		{		
+			Unit * pTarget = g_pMain->GetUnitPtr(*itrx);
+
+			if(pTarget == nullptr || pTarget->isNPC())
+				continue; 
+
+			if (pTarget->GetNation() == pNpc->GetNation() && pTarget->isInRangeSlow(pNpc,RANGE_50M))
+				distributed_member.push_back(pTarget);
+		}
+
+		foreach (itry, distributed_member)
+		{
+			Unit * pTarget = *itry;
+
+			if(pTarget == nullptr || pTarget->isNPC())
+				continue;
+
+			TO_USER(pTarget)->SendLoyaltyChange(nTrapNumber == 0 ? 200 : 50);
+		}
+
+		Announcement(DECLARE_NATION_REWARD_STATUS, Nation::ALL, itr->second->sSid, nullptr, pNpc);
+		ShowNpcEffect(itr->second->sNid,20100,pNpc->GetZoneID());
+		deleted.push_back(itr->second->sSid);
 	}
 
 	foreach (itr, deleted)
