@@ -1,5 +1,6 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "KingSystem.h"
+#include "KnightsManager.h"
 
 #include "../shared/ClientSocketMgr.h"
 #include "../shared/Ini.h"
@@ -16,9 +17,9 @@
 
 using namespace std;
 
-#define NUM_FLAG_VICTORY    4
-#define AWARD_GOLD          100000
-#define AWARD_EXP			5000
+#define NUM_FLAG_VICTORY  4
+#define AWARD_GOLD	100000
+#define AWARD_EXP	5000
 
 std::vector<Thread *> g_timerThreads;
 
@@ -33,6 +34,10 @@ CGameServerDlg::CGameServerDlg()
 	m_sDate = now.GetDay();
 	m_sHour = now.GetHour();
 	m_sMin = now.GetMinute();
+	m_sSec = now.GetSecond();
+
+	m_ReloadKnightAndUserRanksMinute = 0;
+	m_DevakillSecond = 0;
 
 	m_byWeather = 0;
 	m_sWeatherAmount = 0;
@@ -43,11 +48,12 @@ CGameServerDlg::CGameServerDlg()
 
 	m_byExpEventAmount = 0;
 	m_byCoinEventAmount = 0;
+	m_byNPEventAmount = 0;
 
 	m_sPartyIndex = 0;
 
 	m_nCastleCapture = 0;
-
+	
 	m_bFirstServerFlag = false;
 	m_bPointCheckFlag = true;
 
@@ -55,6 +61,21 @@ CGameServerDlg::CGameServerDlg()
 	m_nServerGroupNo = 0;
 	m_nServerGroup = 0;
 	m_sDiscount = 0;
+
+	LeechKig = 0;
+	Apostle = 0;
+	Kocatris = 0;
+	TrollWarrior = 0;
+	Minotaur = 0;
+	DoomSoldier = 0;
+ 
+
+	e_Lirumu = 0;
+	e_Apostle = 0;
+	e_BoneDragon = 0;
+	e_TrollWarrior = 0;
+	e_RedDragon = 0;
+	e_DoomSoldier = 0;
 
 	m_bPermanentChatMode = false;
 	m_bSantaOrAngel = FLYING_NONE;
@@ -78,22 +99,51 @@ bool CGameServerDlg::Startup()
 
 	GetTimeFromIni();
 
-	if (!g_pMain->m_socketMgr.Listen(_LISTEN_PORT, MAX_USER))
+	/*if (!g_pMain->m_socketMgr.Listen(m_GameServerPort, MAX_USER))*/
+	bool IsValidLicense = false;
+	std::string ServerIPAddress = "0.0.0.0";
+	/*std::string LicensedIPAddresses = "31.210.33.199";
+	std::string ServerIPAddress = "0.0.0.0";
+
+	foreach_stlmap_nolock (itr,m_ServerArray)
 	{
-		printf(_T("ERROR: Failed to listen on server port (%d)."), _LISTEN_PORT);
+		if (LicensedIPAddresses.find(itr->second->strServerIP) == std::string::npos)
+			continue;
+
+		ServerIPAddress = itr->second->strServerIP;
+		IsValidLicense = true;
+		break;
+	}
+
+	if (!IsValidLicense)
+	{
+		printf("ERROR:IP Address is not have a license.\n");
+		return false;
+	}*/
+	// License System End
+
+	color_c("\nDarkParadisE - ( Sefa Sirin )\n",FOREGROUND_INTENSITY + FOREGROUND_BLUE );
+	color_c("",0);
+
+
+	//AllocConsole();
+	system("color 0e");
+	color_c("\nGameServer Started\n",FOREGROUND_INTENSITY + FOREGROUND_BLUE );
+	color_c("",7);
+	printf("\n\n");
+
+
+	if (!g_pMain->m_socketMgr.Listen(m_GameServerPort, MAX_USER))
+	{
+		printf(_T("ERROR : Failed to listen on server port (%d).\n"), m_GameServerPort);
 		return false;
 	}
 
-#ifdef CONFIG_USE_IOCP
 	// Bit tacky, but there's no reason we can't reuse the existing completion port for our AI socket
 	m_aiSocketMgr.SetCompletionPort(g_pMain->m_socketMgr.GetCompletionPort());
-#else // ensure epoll/kqueue are still processed for client workers
-	m_aiSocketMgr.SpawnWorkerThreads();
-#endif
-
 	m_aiSocketMgr.InitSessions(1);
 
-	if (!g_DBAgent.Startup(m_bMarsEnabled, 
+	if (!g_DBAgent.Startup(m_bMarsEnabled,
 		m_strAccountDSN, m_strAccountUID, m_strAccountPWD,
 		m_strGameDSN, m_strGameUID, m_strGamePWD)
 		|| !LoadItemTable()
@@ -101,6 +151,7 @@ bool CGameServerDlg::Startup()
 		|| !LoadItemExchangeTable()
 		|| !LoadItemUpgradeTable()
 		|| !LoadItemOpTable()
+		|| !LoadExpiration()
 		|| !LoadServerResourceTable()
 		|| !LoadQuestHelperTable()
 		|| !LoadQuestMonsterTable()
@@ -114,19 +165,26 @@ bool CGameServerDlg::Startup()
 		|| !LoadMagicType7()
 		|| !LoadMagicType8()
 		|| !LoadMagicType9()
+		|| !LoadObjectPosTable()
 		|| !LoadRentalList()
 		|| !LoadCoefficientTable()
 		|| !LoadLevelUpTable()
 		|| !LoadAllKnights()
 		|| !LoadAllKnightsUserData()
 		|| !LoadKnightsAllianceTable()
+		|| !LoadKnightsSiegeWarsTable()
 		|| !LoadUserRankings()
 		|| !LoadKnightsCapeTable()
 		|| !LoadKnightsRankTable()
 		|| !LoadStartPositionTable()
+		|| !LoadStartPositionRandomTable()
 		|| !LoadBattleTable()
 		|| !MapFileLoad()
 		|| !LoadKingSystem()
+		|| !LoadEventTriggerTable()
+		|| !LoadMonsterChallengeTable()
+		|| !LoadMonsterChallengeSummonListTable()
+		|| !LoadEventTimesTable()
 		|| !LoadMonsterSummonListTable()
 		|| !LoadMonsterSummonListZoneTable()
 		|| !LoadMonsterRespawnListTable()
@@ -134,7 +192,7 @@ bool CGameServerDlg::Startup()
 		|| !LoadPremiumItemTable()
 		|| !LoadPremiumItemExpTable()
 		|| !LoadUserDailyOpTable()
-		|| !LoadEventTriggerTable())
+		|| !LoadUserItemTable())
 		return false;
 
 	// Clear any remaining users in the currently logged in list
@@ -143,30 +201,52 @@ bool CGameServerDlg::Startup()
 
 	// Logs Start
 	CreateDirectory("Logs",NULL);
-
+	
 	m_fpDeathUser = fopen(string_format("./Logs/DeathUser_%d_%d_%d.log",time.GetDay(),time.GetMonth(),time.GetYear()).c_str(), "a");
 	if (m_fpDeathUser == nullptr)
 	{
 		printf("ERROR: Unable to open death user log file.\n");
 		return false;
 	}
-
+	
 	m_fpDeathNpc = fopen(string_format("./Logs/DeathNpc_%d_%d_%d.log",time.GetDay(),time.GetMonth(),time.GetYear()).c_str(), "a");
 	if (m_fpDeathNpc == nullptr)
 	{
 		printf("ERROR: Unable to open death npc log file.\n");
 		return false;
 	}
-
+	
 	m_fpChat = fopen(string_format("./Logs/Chat_%d_%d_%d.log",time.GetDay(),time.GetMonth(),time.GetYear()).c_str(), "a");
 	if (m_fpChat == nullptr)
 	{
 		printf("ERROR: Unable to open chat log file.\n");
 		return false;
 	}
+
+	m_fpGM = fopen(string_format("./Logs/GM_%d_%d_%d.log",time.GetDay(),time.GetMonth(),time.GetYear()).c_str(), "a");
+	if (m_fpGM == nullptr)
+	{
+		printf("ERROR: Unable to open GM log file.\n");
+		return false;
+	}
+
+	m_upgradelog = fopen(string_format("./Logs/ItemUpgrade_%d_%d_%d.log",time.GetDay(),time.GetMonth(),time.GetYear()).c_str(), "a");
+	if (m_upgradelog == nullptr)
+	{
+		printf("ERROR: Unable to open GM log file.\n");
+		return false;
+	}
+
+	m_fpCheat = fopen(string_format("./Logs/Cheat_%d_%d_%d.log",time.GetDay(),time.GetMonth(),time.GetYear()).c_str(), "a");
+	if (m_fpCheat == nullptr)
+	{
+		printf("ERROR: Unable to open cheat log file.\n");
+		return false;
+	}
 	// Logs End
 
 	LoadNoticeData();
+	LoadNoticeUpData();
 
 	printf("\n");
 	if (!m_luaEngine.Initialise())
@@ -197,21 +277,21 @@ void CGameServerDlg::GetTimeFromIni()
 	ini.GetString("ODBC", "GAME_UID", "username", m_strGameUID, false);
 	ini.GetString("ODBC", "GAME_PWD", "password", m_strGamePWD, false);
 
-	m_bMarsEnabled = ini.GetBool("ODBC", "GAME_MARS", true);
+	m_bMarsEnabled = ini.GetBool("ODBC", "GAME_MARS", false);
 
 	ini.GetString("ODBC", "ACCOUNT_DSN", "KO_MAIN", m_strAccountDSN, false);
 	ini.GetString("ODBC", "ACCOUNT_UID", "username", m_strAccountUID, false);
 	ini.GetString("ODBC", "ACCOUNT_PWD", "password", m_strAccountPWD, false);
 
-	bool bMarsEnabled = ini.GetBool("ODBC", "ACCOUNT_MARS", true);
-
+	bool bMarsEnabled = ini.GetBool("ODBC", "ACCOUNT_MARS", false);
+	
 	// Both need to be enabled to use MARS.
 	if (!m_bMarsEnabled || !bMarsEnabled)
 		m_bMarsEnabled = false;
 
 	m_byWeather = ini.GetInt("TIMER", "WEATHER", 1);
 
-	ini.GetString("BATTLE", "DAYS","1,6", m_nBattleZoneOpenDays, false);
+	ini.GetString("BATTLE", "DAYS","1,6", m_sBattleZoneOpenDays, false);
 
 	for (int i = 0; i < WAR_TIME_COUNT; i++)
 		m_nBattleZoneOpenHourStart[i] = ini.GetInt("BATTLE",string_format("START_TIME%d",i).c_str(), (i+1) * 7);
@@ -222,6 +302,10 @@ void CGameServerDlg::GetTimeFromIni()
 		if (m_nBattlezoneOpenWarZone[i] > ZONE_BATTLE_BASE)
 			m_nBattlezoneOpenWarZone[i] = m_nBattlezoneOpenWarZone[i] - ZONE_BATTLE_BASE;
 	}
+
+	/*ini.GetString("PVPEVENT", "EDAYS1","1,6", m_sEventZoneOpenDays1, false);
+	ini.GetString("DEVILSQU", "EDAYS2","1,6", m_sEventZoneOpenDays2, false);
+	ini.GetString("LOSTCASTLE", "EDAYS3","1,6", m_sEventZoneOpenDays3, false);*/
 
 	m_nCastleCapture = ini.GetInt("CASTLE", "NATION", 1);
 	m_nServerNo = ini.GetInt("ZONE_INFO", "MY_INFO", 1);
@@ -266,9 +350,70 @@ void CGameServerDlg::GetTimeFromIni()
 	}
 
 	ini.GetString("AI_SERVER", "IP", "127.0.0.1", m_AIServerIP);
-	m_nGameMasterRHitDamage = ini.GetInt("SETTINGS","GAME_MASTER_R_HIT_DAMAGE", 30000);
+	m_AIServerPort = ini.GetInt("AI_SERVER","PORT", 10020);
 
+	m_GameServerPort = ini.GetInt("SETTINGS","PORT", 15001);
+	m_nGameMasterRHitDamage = ini.GetInt("SETTINGS","GAME_MASTER_R_HIT_DAMAGE", 30000);
 	m_nBonusTimeInterval = ini.GetInt("BONUS","SITDOWN_TIME", 15);
+	m_nBonusTimeGold = ini.GetInt("BONUS","SITDOWN_GOLD", 1);
+	m_nBonusPVPWarItem = ini.GetInt("BONUS","PVP_WAR_ITEM", 0);
+	m_CountofTickets = ini.GetInt("BONUS","COUNT_EVENT_ITEM", 1);
+	m_nPlayerRankingResetTime = ini.GetInt("SETTINGS","PLAYER_RANKINGS_RESET_TIME", 12);
+	ini.GetString("SETTINGS", "PLAYER_RANKINGS_REWARD_ZONES","71,72,73", m_sPlayerRankingsRewardZones, false);
+	m_nPlayerRankingKnightCashReward = ini.GetInt("SETTINGS","PLAYER_RANKINGS_KNIGHT_CASH_REWARD", 0);
+	m_nPlayerRankingLoyaltyReward = ini.GetInt("SETTINGS","PLAYER_RANKINGS_LOYALTY_REWARD", 0);
+
+	m_Grade1 = ini.GetInt("SETTINGS","GRADE1", 720000);
+	m_Grade2 = ini.GetInt("SETTINGS","GRADE2", 340000);
+	m_Grade3 = ini.GetInt("SETTINGS","GRADE3", 50000);
+	m_Grade4 = ini.GetInt("SETTINGS","GRADE4", 25000);
+
+	m_upgrade2 = ini.GetInt("UPGRADE_RATES","KARIVDIS_RATE", 10000);
+	m_upgrade1 = ini.GetInt("UPGRADE_RATES","TRINA_RATE", 10000);
+
+	m_Drop1 = ini.GetInt("MINING","MYSTERIOUS_ORE", 399210000);
+	m_Drop2 = ini.GetInt("MINING","MYSTERIOUS_ORE_1", 399210000);
+	m_Drop3 = ini.GetInt("MINING","MYSTERIOUS_ORE_2", 399210000);
+	m_Drop4 = ini.GetInt("MINING","MYSTERIOUS_ORE_3", 399210000);
+	m_Drop5 = ini.GetInt("MINING","MYSTERIOUS_ORE_4", 399210000);
+	m_Drop6 = ini.GetInt("MINING","MYSTERIOUS_ORE_5", 399210000);
+	m_Drop7 = ini.GetInt("MINING","MYSTERIOUS_ORE_6", 399210000);
+	m_Drop8 = ini.GetInt("MINING","MYSTERIOUS_ORE_7", 399210000);
+	m_Drop9 = ini.GetInt("MINING","MYSTERIOUS_ORE_8", 399210000);
+	m_Drop10 = ini.GetInt("MINING","MYSTERIOUS_ORE_9", 399210000);
+	m_gDrop1 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE", 399210000);
+	m_gDrop2 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_1", 399210000);
+	m_gDrop3 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_2", 399210000);
+	m_gDrop4 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_3", 399210000);
+	m_gDrop5 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_4", 399210000);
+	m_gDrop6 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_5", 399210000);
+	m_gDrop7 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_6", 399210000);
+	m_gDrop8 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_7", 399210000);
+	m_gDrop9 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_8", 399210000);
+	m_gDrop10 = ini.GetInt("MINING","MYSTERIOUS_GOLD_ORE_9", 399210000);
+	m_sling = ini.GetInt("MINING","SLING", 389043000);
+
+	f_Drop1 = ini.GetInt("FISHING","FISHING", 399127000);
+	f_Drop2 = ini.GetInt("FISHING","FISHING_1", 399128000);
+	f_Drop3 = ini.GetInt("FISHING","FISHING_2", 399129000);
+	gf_Drop1 = ini.GetInt("FISHING","GOLDEN_FISHING", 399127000);
+	gf_Drop2 = ini.GetInt("FISHING","GOLDEN_FISHING_1", 399128000);
+	gf_Drop3 = ini.GetInt("FISHING","GOLDEN_FISHING_2", 399129000);
+
+	m_byExpEventAmount = ini.GetInt("BONUS","EXP",0);
+	m_byCoinEventAmount = ini.GetInt("BONUS","MONEY",0);
+	m_byNPEventAmount = ini.GetInt("BONUS","NP",0);
+
+	m_Loyalty_Ardream_Source = 	ini.GetInt("NATIONAL_POINTS","ARDREAM_SOURCE",32);
+	m_Loyalty_Ardream_Target = ini.GetInt("NATIONAL_POINTS","ARDREAM_TARGET",-25);
+	m_Loyalty_Ronark_Land_Base_Source = ini.GetInt("NATIONAL_POINTS","RONARK_LAND_BASE_SOURCE",64);
+	m_Loyalty_Ronark_Land_Base_Target = ini.GetInt("NATIONAL_POINTS","RONARK_LAND_BASE_TARGET",-50);
+	m_Loyalty_Ronark_Land_Source = ini.GetInt("NATIONAL_POINTS","RONARK_LAND_SOURCE",64);
+	m_Loyalty_Ronark_Land_Target = ini.GetInt("NATIONAL_POINTS","RONARK_LAND_TARGET",-50);
+	m_Loyalty_Other_Zone_Source = ini.GetInt("NATIONAL_POINTS","OTHER_ZONE_SOURCE",64);
+	m_Loyalty_Other_Zone_Target = ini.GetInt("NATIONAL_POINTS","OTHER_ZONE_TARGET",-50);
+	m_Loyalty_Mini_Pvp_Source = ini.GetInt("NATIONAL_POINTS","MINI_PVP_SOURCE",0);
+	m_Loyalty_Mini_Pvp_Target = ini.GetInt("NATIONAL_POINTS","MINI_PVP_TARGET",0);
 
 	for (int i = 0; i < BIFROST_EVENT_COUNT; i++)
 		m_nBifrostTime[i] = ini.GetInt("BIFROST",string_format("START_TIME%d",i+1).c_str(), 0);
@@ -279,6 +424,12 @@ void CGameServerDlg::GetTimeFromIni()
 	for (int i = 0; i < CHAOS_EVENT_COUNT; i++)
 		m_nChaosTime[i] = ini.GetInt("CHAOS",string_format("START_TIME%d",i+1).c_str(), 0);
 
+	for (int i = 0; i < JURAD_MOUNTAIN_EVENT_COUNT; i++)
+		m_nJuraidTime[i] = ini.GetInt("JURAID",string_format("START_TIME%d",i+1).c_str(), 0);
+
+	m_nTempleEventRemainSeconds = 0;
+	m_sRankResetHour = 0;
+
 	m_UserRankingArray[KARUS_ARRAY].DeleteAllData();
 	m_UserRankingArray[ELMORAD_ARRAY].DeleteAllData();
 
@@ -287,26 +438,64 @@ void CGameServerDlg::GetTimeFromIni()
 
 	m_xBifrostRemainingTime = (240 * MINUTE);  // Bifrost remaining time ( 4 hour ).
 	m_xBifrostMonumentAttackTime = (30 * MINUTE); // Players is attack a monument last 30 minute.
-	m_xBifrostTime = (90 * MINUTE); // Victory nation time ( 1 hour and 30 minute )
+	m_xBifrostTime = (120 * MINUTE); // Victory nation time ( 1 hour and 30 minute )
 	m_xJoinOtherNationBifrostTime = (60 * MINUTE); // Other nation join time ( last 1 hour )
 
 	m_bAttackBifrostMonument = false;
 	m_BifrostVictory = 0;
 	m_sBifrostRemainingTime = m_xBifrostRemainingTime + 60;
 	m_sBifrostTime = 0;
+	m_sBifrostWarStart = false;
+	m_sBifrostVictoryAll = 3;
+	m_sBifrostVictoryNoticeAll = false;
 
-	m_nPVPMonumentNation[ZONE_ARDREAM] = 0; 
-	m_nPVPMonumentNation[ZONE_RONARK_LAND_BASE] = 0;
-	m_nPVPMonumentNation[ZONE_RONARK_LAND] = 0;
+	m_IsMagicTableInUpdateProcess = false;
+	m_IsPlayerRankingUpdateProcess = false;
 
-	pTempleEvent.isActive = false;
+	m_nEventMonumentNation[ZONE_ARDREAM] = 0;
+	m_nEventMonumentNation[ZONE_PVP_EVENT] = 0;
+	m_nEventMonumentNation[ZONE_RONARK_LAND_BASE] = 0;
+	m_nEventMonumentNation[ZONE_RONARK_LAND] = 0;
+	m_nEventMonumentNation[ZONE_BORDER_DEFENSE_WAR] = 0;
+
 	pTempleEvent.ActiveEvent = -1;
+	pTempleEvent.ZoneID = 0;
+	pTempleEvent.LastEventRoom = 1;
 	pTempleEvent.StartTime = 0;
 	pTempleEvent.AllUserCount = 0;
 	pTempleEvent.KarusUserCount = 0;
 	pTempleEvent.ElMoradUserCount = 0;
+	pTempleEvent.isAttackable = false;
+	pTempleEvent.isActive = false;
+	memset(pTempleEvent.m_sBdwMiniTimer , -1 , sizeof(pTempleEvent.m_sBdwMiniTimer));
+	memset(pTempleEvent.m_sMiniTimerNation , -1 , sizeof(pTempleEvent.m_sMiniTimerNation));
+	memset(pTempleEvent.KarusDeathCount , 0 , sizeof(pTempleEvent.KarusDeathCount));
+	memset(pTempleEvent.ElmoDeathCount , 0 , sizeof(pTempleEvent.ElmoDeathCount));
 
-	g_timerThreads.push_back(new Thread(Timer_TempleEventTimer));
+	m_bForgettenTempleIsActive = false;
+	m_nForgettenTempleStartHour = 0;
+	m_nForgettenTempleLevelMin = 0;
+	m_nForgettenTempleLevelMax = 0;
+	m_nForgettenTempleStartTime = 0;
+	m_nForgettenTempleChallengeTime = 0;
+	m_bForgettenTempleSummonMonsters = false;
+	m_nForgettenTempleCurrentStage = 0;
+	m_nForgettenTempleLastStage = 0;
+	m_nForgettenTempleLastSummonTime = 0;
+	m_nForgettenTempleBanishFlag = false;
+	m_nForgettenTempleBanishTime = 0;
+
+	m_bEventZoneIsActive = false;
+	m_nEventZoneStartHour = 0;
+	m_nEventZoneLevelMin = 0;
+	m_nEventZoneLevelMax = 0;
+	m_nEventZoneStartTime = 0;
+	m_nEventZoneTime = 0;
+	m_nEventZoneBanishFlag = false;
+	m_nEventZoneBanishTime = 0;
+	m_sKarusBdw = 0;
+	m_sElmoBdw = 0;
+	g_timerThreads.push_back(new Thread(Timer_CheckGameEvents));
 	g_timerThreads.push_back(new Thread(Timer_BifrostTime));
 	g_timerThreads.push_back(new Thread(Timer_UpdateGameTime));
 	g_timerThreads.push_back(new Thread(Timer_UpdateSessions));
@@ -392,13 +581,13 @@ CUser* CGameServerDlg::GetUserPtr(string findName, NameType type)
 	NameMap::iterator itr;
 	if (type == TYPE_ACCOUNT)
 	{
-		FastGuard lock(m_accountNameLock);
+		Guard lock(m_accountNameLock);
 		itr = m_accountNameMap.find(findName);
 		return (itr != m_accountNameMap.end() ? itr->second : nullptr);
 	}
 	else if (type == TYPE_CHARACTER)
 	{
-		FastGuard lock(m_characterNameLock);
+		Guard lock(m_characterNameLock);
 		itr = m_characterNameMap.find(findName);
 		return (itr != m_characterNameMap.end() ? itr->second : nullptr);
 	}
@@ -413,7 +602,7 @@ CUser* CGameServerDlg::GetUserPtr(string findName, NameType type)
 */
 void CGameServerDlg::AddAccountName(CUser *pSession)
 {
-	FastGuard lock(m_accountNameLock);
+	Guard lock(m_accountNameLock);
 	string upperName = pSession->m_strAccountID;
 	STRTOUPPER(upperName);
 	m_accountNameMap[upperName] = pSession;
@@ -426,7 +615,7 @@ void CGameServerDlg::AddAccountName(CUser *pSession)
 */
 void CGameServerDlg::AddCharacterName(CUser *pSession)
 {
-	FastGuard lock(m_characterNameLock);
+	Guard lock(m_characterNameLock);
 	string upperName = pSession->GetName();
 	STRTOUPPER(upperName);
 	m_characterNameMap[upperName] = pSession;
@@ -442,7 +631,7 @@ void CGameServerDlg::AddCharacterName(CUser *pSession)
 */
 void CGameServerDlg::ReplaceCharacterName(CUser *pSession, std::string & strNewUserID)
 {
-	FastGuard lock(m_characterNameLock);
+	Guard lock(m_characterNameLock);
 
 	// Remove the old name from the map
 	string upperName = pSession->GetName();
@@ -465,7 +654,7 @@ void CGameServerDlg::RemoveSessionNames(CUser *pSession)
 	STRTOUPPER(upperName);
 
 	{ // remove account name from map (limit scope)
-		FastGuard lock(m_accountNameLock);
+		Guard lock(m_accountNameLock);
 		m_accountNameMap.erase(upperName);
 	}
 
@@ -474,7 +663,7 @@ void CGameServerDlg::RemoveSessionNames(CUser *pSession)
 		upperName = pSession->GetName();
 		STRTOUPPER(upperName);
 
-		FastGuard lock(m_characterNameLock);
+		Guard lock(m_characterNameLock);
 		m_characterNameMap.erase(upperName);
 	}
 }
@@ -485,6 +674,7 @@ _PARTY_GROUP		* CGameServerDlg::GetPartyPtr(uint16 sPartyID) { return m_PartyArr
 CKnights			* CGameServerDlg::GetClanPtr(uint16 sClanID) { return m_KnightsArray.GetData(sClanID); }
 _KNIGHTS_ALLIANCE	* CGameServerDlg::GetAlliancePtr(uint16 sAllianceID) { return m_KnightsAllianceArray.GetData(sAllianceID); }
 _ITEM_TABLE			* CGameServerDlg::GetItemPtr(uint32 nItemID) { return m_ItemtableArray.GetData(nItemID); }
+_KNIGHTS_SIEGE_WARFARE	* CGameServerDlg::GetSiegeMasterKnightsPtr(uint16 sCastleIndex) { return m_KnightsSiegeWarfareArray.GetData(sCastleIndex); }
 
 Unit * CGameServerDlg::GetUnitPtr(uint16 id)
 {
@@ -506,7 +696,7 @@ Unit * CGameServerDlg::GetUnitPtr(uint16 id)
 * @param	sCount	  	Number of spawns to create.
 * @param	sRadius	  	Spawn radius.
 */
-void CGameServerDlg::SpawnEventNpc(uint16 sSid, bool bIsMonster, uint8 byZone, float fX, float fY, float fZ, uint16 sCount /*= 1*/, uint16 sRadius /*= 0*/, uint16 sDuration /*= 0*/, uint8 nation /*= 0*/,int16 socketID /*= -1*/, int16 nEventRoom)
+void CGameServerDlg::SpawnEventNpc(uint16 sSid, bool bIsMonster, uint8 byZone, float fX, float fY, float fZ, uint16 sCount /*= 1*/, uint16 sRadius /*= 0*/, uint16 sDuration /*= 0*/, uint8 nation /*= 0*/,int16 socketID /*= -1*/, uint16 nEventRoom)
 {
 	Packet result(AG_NPC_SPAWN_REQ);
 	result	<< sSid << bIsMonster 
@@ -524,7 +714,7 @@ void CGameServerDlg::SpawnEventNpc(uint16 sSid, bool bIsMonster, uint8 byZone, f
 void CGameServerDlg::KillNpc(uint16 sNid)
 {
 	Packet result(AG_NPC_KILL_REQ);
-	result	<< sNid;
+	result  << sNid;
 	Send_AIServer(&result);
 }
 
@@ -559,13 +749,99 @@ void CGameServerDlg::DeleteParty(uint16 sIndex)
 {
 	m_PartyArray.DeleteData(sIndex);
 }
+void CGameServerDlg::SnowBattleZoneOpenTimer()
+{
+	int nWeekDay = g_localTime.tm_wday;
+	int nHour = g_localTime.tm_hour;
+	int nMin = g_localTime.tm_min;
+	
+	CUser* pUser = g_pMain->GetUserPtr("EvaneScence", TYPE_CHARACTER);
 
-uint32 CGameServerDlg::Timer_TempleEventTimer(void * lpParam)
+	if (!isWarOpen() && nMin == 0)
+	{
+		std::list<std::string> vargs = StrSplit(m_sBattleZoneOpenDays, ",");
+		uint8 nDaySize = vargs.size();
+		if (nDaySize > 0)
+		{
+			uint8 nDay = 0;
+			for (int i = 0; i < nDaySize; i++)
+			{
+				nDay = atoi(vargs.front().c_str());
+				if (nDay == nWeekDay)
+				{
+					for (int x = 0; x < WAR_TIME_COUNT; x++)
+					{
+						if (m_nBattleZoneOpenHourStart[x] == nHour && nMin == 0)
+							BattleZoneOpen(SNOW_BATTLEZONE_OPEN, m_nBattlezoneOpenWarZone[x]);
+					}
+				}
+				vargs.pop_front();
+			}
+		}
+	}
+	else if (m_byBattleOpen == SNOW_BATTLE)	
+	{
+		SnowBattleZoneCurrentUsers();
+
+		int32 WarElapsedTime = int32(UNIXTIME) - m_byBattleOpenedTime;
+		m_byBattleRemainingTime = m_byBattleTime - WarElapsedTime;
+		uint8 nBattleZone = ZONE_SNOW_BATTLE;
+
+		if (m_bVictory == 0)
+		{
+			if (WarElapsedTime == (m_byBattleTime / 24)) // Select captain
+			{
+				m_KnightsRatingArray[KARUS_ARRAY].DeleteAllData();
+				m_KnightsRatingArray[ELMORAD_ARRAY].DeleteAllData();
+				LoadKnightsRankTable(true, true);
+			}
+			else if (WarElapsedTime == (m_byBattleTime / 2)) // War half time.
+			{
+				if (nBattleZone == ZONE_SNOW_BATTLE)
+					BattleWinnerResult(BATTLE_WINNER_KILL);
+			}
+
+			m_sBattleTimeDelay++;
+
+			if (WarElapsedTime >= m_byBattleTime) // War is over.
+			{
+				m_sBattleTimeDelay++;
+
+				if (m_sBattleTimeDelay >= (m_byBattleTime / 24))
+				{
+					m_sBattleTimeDelay = 0;
+					SnowBattleZoneClose();
+			}
+		}
+	}
+}
+	if (m_bySnowBanishFlag)
+	{
+		m_sBanishDelay++;
+
+		if (m_sBanishDelay == (m_byBattleTime / 360))
+			Announcement(SNOW_BAN);
+		else if (m_sBanishDelay == (m_byBattleTime / 120)) {
+			m_bySnowBanishFlag = false;
+			m_sBanishDelay = 0;
+			SnowBanishLosers();
+		}
+	}
+}
+uint32 CGameServerDlg::Timer_CheckGameEvents(void * lpParam)
 {
 	while (g_bRunning)
 	{
+		g_pMain->BattleZoneOpenTimer();  // Check if it's time for the BattleZone to open or end.
+		g_pMain->SnowBattleZoneOpenTimer(); // SnowWar
 		g_pMain->TempleEventTimer();
-		sleep(6 * SECOND);
+		g_pMain->ForgettenTempleEventTimer();
+		//g_pMain->EventZoneTimer();
+		if (g_pMain->isWarOpen() && ((UNIXTIME - g_pMain->m_lastBlessTime) >= (5 * NATION_MONUMENT_REWARD_SECOND)))
+			g_pMain->CheckNationMonumentRewards();
+		else if (g_pMain->pTempleEvent.ActiveEvent == TEMPLE_EVENT_BORDER_DEFENCE_WAR && (UNIXTIME - g_pMain->m_lastBorderTime >= (10 * NATION_MONUMENT_REWARD_SECOND)))
+			g_pMain->BorderMonumentBosses();
+		sleep(1 * SECOND);
 	}
 	return 0;
 }
@@ -578,30 +854,42 @@ uint32 CGameServerDlg::Timer_BifrostTime(void * lpParam)
 		{
 			g_pMain->m_sBifrostRemainingTime -= 60;
 
-			if (g_pMain->m_sBifrostRemainingTime == 0)
+			if (g_pMain->m_sBifrostRemainingTime == 0 && !g_pMain->m_sBifrostWarStart)
 			{
 				g_pMain->m_BifrostVictory = 0;
 				g_pMain->m_sBifrostRemainingTime = g_pMain->m_xBifrostRemainingTime;
 				g_pMain->m_sBifrostTime = 0;
-				g_pMain->SendFormattedResource(IDS_BEEF_ROAST_DRAW, Nation::ALL, false);
-
-				if (g_pMain->m_bAttackBifrostMonument)
-					g_pMain->m_bAttackBifrostMonument = false;
-
-				g_pMain->SendEventRemainingTime(true, nullptr, ZONE_BIFROST);
-			}
-			else if (g_pMain->m_sBifrostRemainingTime == g_pMain->m_xBifrostMonumentAttackTime)
-			{
 				g_pMain->SendFormattedResource(IDS_BEEF_ROAST_START, Nation::ALL, false);
 
 				if (!g_pMain->m_bAttackBifrostMonument)
 					g_pMain->m_bAttackBifrostMonument = true;
+
+				g_pMain->m_sBifrostWarStart=true;
+				g_pMain->m_sBifrostRemainingTime = g_pMain->m_xBifrostMonumentAttackTime;
+				g_pMain->SendEventRemainingTime(true, nullptr, ZONE_BIFROST);
+			}
+			else if (g_pMain->m_sBifrostRemainingTime == 0 && g_pMain->m_sBifrostWarStart)
+			{
+				g_pMain->m_sBifrostWarStart=false;
+				g_pMain->SendFormattedResource(IDS_BEEF_ROAST_FINISH, Nation::ALL, false);
+
+				g_pMain->m_sBifrostRemainingTime = g_pMain->m_xBifrostRemainingTime;
+				g_pMain->SendEventRemainingTime(true, nullptr, ZONE_BIFROST);
+				
+				if (g_pMain->m_bAttackBifrostMonument)
+					g_pMain->m_bAttackBifrostMonument = false;
 			}
 		}
 		else if (g_pMain->m_BifrostVictory != 0)
 		{
 			g_pMain->m_sBifrostTime -= 60;
 			g_pMain->m_sBifrostRemainingTime = g_pMain->m_sBifrostTime;
+
+			if(g_pMain->m_sBifrostTime <= 90 * MINUTE && !g_pMain->m_sBifrostVictoryNoticeAll)
+			{
+				g_pMain->SendFormattedResource(IDS_BEEF_ROAST_DRAW, Nation::ALL, false);
+				g_pMain->m_sBifrostVictoryNoticeAll = true;
+			}
 
 			if (g_pMain->m_sBifrostTime == 0)
 			{
@@ -612,8 +900,10 @@ uint32 CGameServerDlg::Timer_BifrostTime(void * lpParam)
 
 				if (g_pMain->m_bAttackBifrostMonument)
 					g_pMain->m_bAttackBifrostMonument = false;
-
+				
+				g_pMain->m_sBifrostWarStart=false;
 				g_pMain->SendEventRemainingTime(true, nullptr, ZONE_BIFROST);
+				g_pMain->KickOutZoneUsers(ZONE_BIFROST,ZONE_RONARK_LAND);
 			}
 			else if (g_pMain->m_sBifrostTime == g_pMain->m_xJoinOtherNationBifrostTime)
 			{
@@ -627,6 +917,22 @@ uint32 CGameServerDlg::Timer_BifrostTime(void * lpParam)
 	return 0;
 }
 
+CNpc*  CGameServerDlg::UpdateNpc()
+{
+	foreach_stlmap (itr, m_arNpcArray)
+	{
+		CNpc * pNpc = TO_NPC(itr->second);
+		if (pNpc != nullptr)
+		{
+			if (pNpc->m_bType3Flag)
+				pNpc->HPTimeChangeType3();
+	// Check for expired type 4 buffs
+			pNpc->InitType4(true);
+		}
+	}
+	return 0;
+}
+
 uint32 CGameServerDlg::Timer_UpdateGameTime(void * lpParam)
 {
 	while (g_bRunning)
@@ -636,7 +942,8 @@ uint32 CGameServerDlg::Timer_UpdateGameTime(void * lpParam)
 		if (++g_pMain->m_sErrorSocketCount > 3)
 			g_pMain->AIServerConnect();
 
-		sleep(1 * SECOND);
+		g_pMain->UpdateNpc();
+		sleep(10 * SECOND);
 	}
 	return 0;
 }
@@ -645,11 +952,10 @@ uint32 CGameServerDlg::Timer_UpdateSessions(void * lpParam)
 {
 	while (g_bRunning)
 	{
-		SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+		SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 		foreach (itr, sessMap)
 		{
 			CUser * pUser = TO_USER(itr->second);
-
 #ifndef DEBUG // ignore timeouts in debug builds, as we'll probably be pausing it with the debugger.
 			uint32 timeout = KOSOCKET_TIMEOUT;
 
@@ -664,11 +970,9 @@ uint32 CGameServerDlg::Timer_UpdateSessions(void * lpParam)
 				continue;
 			}
 #endif
-			// Update the player, and hence any skill effects while we're here.
 			if (pUser->isInGame())
 				pUser->Update();
 		}
-		g_pMain->m_socketMgr.ReleaseLock();
 		sleep(30 * SECOND);
 	}
 	return 0;
@@ -684,49 +988,21 @@ uint32 CGameServerDlg::Timer_UpdateConcurrent(void * lpParam)
 	return 0;
 }
 
-uint32 CGameServerDlg::Timer_ReloadUserAndKnightsRating(void * lpParam)
-{
-	while (g_bRunning)
-	{
-		g_DBAgent.UpdateRanks();
-
-		// Update clan grades/rankings
-		g_pMain->m_KnightsArray.DeleteAllData();
-		g_pMain->m_KnightsAllianceArray.DeleteAllData();
-		g_pMain->m_KnightsAllianceArray.DeleteAllData();
-		g_pMain->m_KnightsRatingArray[KARUS_ARRAY].DeleteAllData();
-		g_pMain->m_KnightsRatingArray[ELMORAD_ARRAY].DeleteAllData();
-		g_pMain->LoadAllKnights();
-		g_pMain->LoadAllKnightsUserData();
-		g_pMain->LoadKnightsAllianceTable();
-		g_pMain->LoadKnightsRankTable();
-
-		// Update user rankings
-		g_pMain->CleanupUserRankings();
-		g_pMain->LoadUserRankings();
-
-		sleep(RELOAD_KNIGHTS_AND_USER_RATING * MINUTE);
-	}
-	return 0;
-}
-
 void CGameServerDlg::ReqUpdateConcurrent()
 {
 	Packet result(WIZ_ZONE_CONCURRENT);
 	result	<< uint32(m_nServerNo)
 		<< uint32(m_socketMgr.GetActiveSessionMap().size());
-	g_pMain->m_socketMgr.ReleaseLock();
 	AddDatabaseRequest(result);
 }
 
 void CGameServerDlg::AIServerConnect()
 {
 	// Are there any (note: we only use 1 now) idle/disconnected sessions?
-	SessionMap & sessMap = m_aiSocketMgr.GetIdleSessionMap();
+	SessionMap sessMap = m_aiSocketMgr.GetIdleSessionMap();
 
 	// Copy the map (should only be 1 socket anyway) to avoid breaking the iterator
 	SessionMap idleSessions = sessMap;
-	m_aiSocketMgr.ReleaseLock();
 
 	// No idle sessions? Excellent.
 	if (idleSessions.empty())
@@ -737,7 +1013,7 @@ void CGameServerDlg::AIServerConnect()
 	{
 		CAISocket *pSock = static_cast<CAISocket *>(itr->second);
 		bool bReconnecting = pSock->IsReconnecting();
-		if (!pSock->Connect(m_AIServerIP.c_str(), AI_SERVER_PORT)) // couldn't connect... let's leave you alone for now
+		if (!pSock->Connect(m_AIServerIP.c_str(), m_AIServerPort)) // couldn't connect... let's leave you alone for now
 			continue;
 
 		// Connected! Now send the connection packet.
@@ -758,9 +1034,10 @@ void CGameServerDlg::AIServerConnect()
 * @param	nation			   	The nation.
 * @param	seekingPartyOptions	Bitmask of classes to send to.
 */
-void CGameServerDlg::Send_Zone_Matched_Class(Packet *pkt, uint8 bZoneID, CUser* pExceptUser, uint8 nation, uint8 seekingPartyOptions, int16 nEventRoom)
+void CGameServerDlg::Send_Zone_Matched_Class(Packet *pkt, uint8 bZoneID, CUser* pExceptUser, 
+											 uint8 nation, uint8 seekingPartyOptions, uint16 nEventRoom)
 {
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser * pUser = TO_USER(itr->second);
@@ -770,7 +1047,7 @@ void CGameServerDlg::Send_Zone_Matched_Class(Packet *pkt, uint8 bZoneID, CUser* 
 			|| pUser->isInParty()) // looking for users to join the party
 			continue;
 
-		if (nEventRoom != pUser->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pUser->GetEventRoom())
 			continue;
 
 		// If we're in the neutral zone (Moradon), it doesn't matter which nation we party with.
@@ -785,7 +1062,6 @@ void CGameServerDlg::Send_Zone_Matched_Class(Packet *pkt, uint8 bZoneID, CUser* 
 				pUser->Send(pkt);
 		}
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 }
 
 /**
@@ -798,9 +1074,9 @@ void CGameServerDlg::Send_Zone_Matched_Class(Packet *pkt, uint8 bZoneID, CUser* 
 * @param	nation	   	Nation to allow. If unspecified, will default to Nation::ALL 
 * 						which will send to all/both nations.
 */
-void CGameServerDlg::Send_Zone(Packet *pkt, uint8 bZoneID, CUser* pExceptUser /*= nullptr*/, uint8 nation /*= 0*/, int16 nEventRoom)
+void CGameServerDlg::Send_Zone(Packet *pkt, uint8 bZoneID, CUser* pExceptUser /*= nullptr*/, uint8 nation /*= 0*/, uint16 nEventRoom, float fRange)
 {
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser * pUser = TO_USER(itr->second);
@@ -810,18 +1086,20 @@ void CGameServerDlg::Send_Zone(Packet *pkt, uint8 bZoneID, CUser* pExceptUser /*
 			|| (nation != Nation::ALL && nation != pUser->GetNation()))
 		{
 			if (pExceptUser != nullptr)
-				if (pUser == pExceptUser)
+			{
+				if (pUser == pExceptUser
+					|| (fRange > 0.0f && pUser->isInRange(pExceptUser, fRange)))
 					continue;
+			}
 
 			continue;
 		}
 
-		if (nEventRoom != pUser->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pUser->GetEventRoom())
 			continue;
 
 		pUser->Send(pkt);
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 }
 
 /**
@@ -832,9 +1110,10 @@ void CGameServerDlg::Send_Zone(Packet *pkt, uint8 bZoneID, CUser* pExceptUser /*
 * @param	nation	   	Nation to allow. If unspecified, will default to Nation::ALL 
 * 						which will send to all/both nations.
 */
-void CGameServerDlg::Send_All(Packet *pkt, CUser* pExceptUser /*= nullptr*/, uint8 nation /*= 0*/, uint8 ZoneID /*= 0*/, int16 nEventRoom /*= -1*/)
+void CGameServerDlg::Send_All(Packet *pkt, CUser* pExceptUser /*= nullptr*/, uint8 nation /*= 0*/, 
+							  uint8 ZoneID /*= 0*/, bool isSendEventUsers /* false */, uint16 nEventRoom /*= -1*/)
 {
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser * pUser = TO_USER(itr->second);
@@ -847,32 +1126,40 @@ void CGameServerDlg::Send_All(Packet *pkt, CUser* pExceptUser /*= nullptr*/, uin
 			if (pUser->GetZoneID() != ZoneID) 
 				continue;
 
-		if (nEventRoom != pUser->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pUser->GetEventRoom())
 			continue;
+		
+		/*if (isSendEventUsers && !pUser->isEventUser())
+			continue;*/
 
 		pUser->Send(pkt);
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 }
 
-void CGameServerDlg::Send_Region(Packet *pkt, C3DMap *pMap, int x, int z, CUser* pExceptUser, int16 nEventRoom)
+void CGameServerDlg::Send_Region(Packet *pkt, C3DMap *pMap, int x, int z, CUser* pExceptUser, uint16 nEventRoom)
 {
 	foreach_region(rx, rz)
 		Send_UnitRegion(pkt, pMap, rx + x, rz + z, pExceptUser, nEventRoom);
 }
 
-void CGameServerDlg::Send_UnitRegion(Packet *pkt, C3DMap *pMap, int x, int z, CUser *pExceptUser, int16 nEventRoom)
+void CGameServerDlg::Send_UnitRegion(Packet *pkt, C3DMap *pMap, int x, int z, CUser *pExceptUser, uint16 nEventRoom)
 {
 	if (pMap == nullptr)
 		return;
 
-	FastGuard lock(pMap->m_lock);
+	Guard lock(pMap->m_lock);
 	CRegion *pRegion = pMap->GetRegion(x, z);
 	if (pRegion == nullptr)
 		return;
 
-	FastGuard lock2(pRegion->m_lock);
-	foreach (itr, pRegion->m_RegionUserArray)
+	Guard lock2(pRegion->m_lock);
+	
+	if (pRegion->m_RegionUserArray.size() <= 0)
+		return;
+
+	// Protect array changes...
+	ZoneUserArray cm_RegionUserArray = pRegion->m_RegionUserArray;
+	foreach (itr, cm_RegionUserArray)
 	{
 		CUser *pUser = GetUserPtr(*itr);
 		if (pUser == nullptr 
@@ -880,7 +1167,7 @@ void CGameServerDlg::Send_UnitRegion(Packet *pkt, C3DMap *pMap, int x, int z, CU
 			|| !pUser->isInGame())
 			continue;
 
-		if (nEventRoom != pUser->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pUser->GetEventRoom())
 			continue;
 
 		pUser->Send(pkt);
@@ -888,7 +1175,7 @@ void CGameServerDlg::Send_UnitRegion(Packet *pkt, C3DMap *pMap, int x, int z, CU
 }
 
 // TODO: Move the following two methods into a base CUser/CNpc class
-void CGameServerDlg::Send_OldRegions(Packet *pkt, int old_x, int old_z, C3DMap *pMap, int x, int z, CUser* pExceptUser, int16 nEventRoom)
+void CGameServerDlg::Send_OldRegions(Packet *pkt, int old_x, int old_z, C3DMap *pMap, int x, int z, CUser* pExceptUser, uint16 nEventRoom)
 {
 	if (old_x != 0)
 	{
@@ -912,7 +1199,7 @@ void CGameServerDlg::Send_OldRegions(Packet *pkt, int old_x, int old_z, C3DMap *
 	}
 }
 
-void CGameServerDlg::Send_NewRegions(Packet *pkt, int new_x, int new_z, C3DMap *pMap, int x, int z, CUser* pExceptUser, int16 nEventRoom)
+void CGameServerDlg::Send_NewRegions(Packet *pkt, int new_x, int new_z, C3DMap *pMap, int x, int z, CUser* pExceptUser, uint16 nEventRoom)
 {
 	if (new_x != 0)
 	{
@@ -937,7 +1224,7 @@ void CGameServerDlg::Send_NewRegions(Packet *pkt, int new_x, int new_z, C3DMap *
 	}
 }
 
-void CGameServerDlg::Send_NearRegion(Packet *pkt, C3DMap *pMap, int region_x, int region_z, float curx, float curz, CUser* pExceptUser, int16 nEventRoom)
+void CGameServerDlg::Send_NearRegion(Packet *pkt, C3DMap *pMap, int region_x, int region_z, float curx, float curz, CUser* pExceptUser, uint16 nEventRoom)
 {
 	int left_border = region_x * VIEW_DISTANCE, top_border = region_z * VIEW_DISTANCE;
 	Send_FilterUnitRegion(pkt, pMap, region_x, region_z, curx, curz, pExceptUser, nEventRoom);
@@ -967,17 +1254,21 @@ void CGameServerDlg::Send_NearRegion(Packet *pkt, C3DMap *pMap, int region_x, in
 	}
 }
 
-void CGameServerDlg::Send_FilterUnitRegion(Packet *pkt, C3DMap *pMap, int x, int z, float ref_x, float ref_z, CUser *pExceptUser, int16 nEventRoom)
+void CGameServerDlg::Send_FilterUnitRegion(Packet *pkt, C3DMap *pMap, int x, int z, float ref_x, float ref_z, CUser *pExceptUser, uint16 nEventRoom)
 {
 	if (pMap == nullptr)
 		return;
 
-	FastGuard lock(pMap->m_lock);
+	Guard lock(pMap->m_lock);
 	CRegion *pRegion = pMap->GetRegion(x, z);
 	if (pRegion == nullptr)
 		return;
 
-	FastGuard lock2(pRegion->m_lock);
+	 Guard lock2(pRegion->m_lock);
+	 
+	 if (pRegion->m_RegionUserArray.size() <= 0)
+		return;
+
 	foreach (itr, pRegion->m_RegionUserArray)
 	{
 		CUser *pUser = GetUserPtr(*itr);
@@ -986,7 +1277,7 @@ void CGameServerDlg::Send_FilterUnitRegion(Packet *pkt, C3DMap *pMap, int x, int
 			|| !pUser->isInGame())
 			continue;
 
-		if (nEventRoom != pUser->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pUser->GetEventRoom())
 			continue;
 
 		if (sqrt(pow((pUser->m_curx - ref_x), 2) + pow((pUser->m_curz - ref_z), 2)) < 32)
@@ -1040,16 +1331,54 @@ void CGameServerDlg::UpdateGameTime()
 {
 	DateTime now(&g_localTime);
 
-	BattleZoneOpenTimer();	// Check if it's time for the BattleZone to open or end.
-
 	// Check timed King events.
 	foreach_stlmap (itr, m_KingSystemArray)
 		itr->second->CheckKingTimer();
+	// Juraid Deval Kill Code By EvaneScence
+	if (m_sSec != now.GetSecond())
+	{
+		if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_JURAD_MOUNTAIN && pTempleEvent.isDevaControl)
+		{
+			m_DevakillSecond++;
 
+			if (pTempleEvent.isDevaFlag && pTempleEvent.isAttackable && pTempleEvent.isActive)
+			{
+				pTempleEvent.isAttackable = false;
+				pTempleEvent.isDevaFlag = false;
+				TerminationFinish();
+			}
+			if (m_DevakillSecond == DEVA_KILL_TIME && pTempleEvent.isActive)
+			{
+				TempleEventFinish();
+				m_DevakillSecond = 0;
+				pTempleEvent.isDevaControl = false;
+			}
+		}		
+	}
 	// Every minute
 	if (m_sMin != now.GetMinute())
 	{
+		m_ReloadKnightAndUserRanksMinute++;
 
+		if (m_ReloadKnightAndUserRanksMinute == RELOAD_KNIGHTS_AND_USER_RATING)
+		{
+			m_ReloadKnightAndUserRanksMinute = 0;
+			ReloadKnightAndUserRanks();
+		}
+
+		// Player Ranking Rewards
+		std::list<std::string> vargs = StrSplit(m_sPlayerRankingsRewardZones, ",");
+		uint8 nZones = vargs.size();
+		if (nZones > 0)
+		{
+			uint8 nZoneID = 0;
+			for (int i = 0; i < nZones; i++)
+			{
+				nZoneID = atoi(vargs.front().c_str());
+				SetPlayerRankingRewards(nZoneID);
+				vargs.pop_front();
+			}
+		}
 	}
 
 	// Every hour
@@ -1082,7 +1411,7 @@ void CGameServerDlg::UpdateGameTime()
 	m_sDate = now.GetDay();
 	m_sHour = now.GetHour();
 	m_sMin = now.GetMinute();
-
+	m_sSec = now.GetSecond();
 	Packet result(AG_TIME_WEATHER);
 	result << m_sYear << m_sMonth << m_sDate << m_sHour << m_sMin << m_byWeather << m_sWeatherAmount;
 	Send_AIServer(&result);
@@ -1090,7 +1419,7 @@ void CGameServerDlg::UpdateGameTime()
 
 void CGameServerDlg::ResetLoyaltyMonthly()
 {
-	SessionMap & sessMap = m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser * pUser = TO_USER(itr->second);
@@ -1101,9 +1430,6 @@ void CGameServerDlg::ResetLoyaltyMonthly()
 	// Attempt to update the database in this thread directly, while the session map's locked.
 	// This prevents new users from logging in before they've been reset (hence keeping last month's total).
 	g_DBAgent.ResetLoyaltyMonthly();
-
-	// Free the lock, so they can now continue to login and such.
-	m_socketMgr.ReleaseLock();
 }
 
 void CGameServerDlg::UpdateWeather()
@@ -1151,7 +1477,7 @@ void CGameServerDlg::UpdateWeather()
 	Packet fakeWeather(WIZ_WEATHER, uint8(WEATHER_FINE));
 	fakeWeather << m_sWeatherAmount;
 
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser * pUser = TO_USER(itr->second);
@@ -1165,7 +1491,6 @@ void CGameServerDlg::UpdateWeather()
 		else
 			pUser->Send(&realWeather);
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 }
 
 void CGameServerDlg::SetGameTime()
@@ -1174,33 +1499,41 @@ void CGameServerDlg::SetGameTime()
 	ini.SetInt( "TIMER", "WEATHER", m_byWeather );
 }
 
-void CGameServerDlg::ResetPlayerRankings()
+void CGameServerDlg::ResetPlayerRankings(uint8 ZoneID)
 {
-	if (m_sRankResetHour == 12) {
+	if (m_sRankResetHour == m_nPlayerRankingResetTime || ZoneID > 0)
+	{
+		m_IsPlayerRankingUpdateProcess = true;
 		m_sRankResetHour = 0;
 
 		for (int nation = KARUS_ARRAY; nation <= ELMORAD_ARRAY; nation++)
 		{
-			foreach_stlmap_nolock(itr, g_pMain->m_UserRankingArray[nation+1]) {
-				_USER_RANKING *pRank = g_pMain->m_UserRankingArray[nation+1].GetData(itr->first);
+			foreach_stlmap (itr, g_pMain->m_UserRankingArray[nation])
+			{
+				_USER_RANKING * pRankInfo = g_pMain->m_UserRankingArray[nation].GetData(itr->first);
 
-				if (pRank == nullptr)
+				if (pRankInfo == nullptr)
 					continue;
 
-				CUser * pUser = g_pMain->GetUserPtr(pRank->m_socketID);
+				CUser * pUser = g_pMain->GetUserPtr(pRankInfo->m_socketID);
 
-				if (pUser == nullptr || pUser->isInTempleEventZone())
+				if (pUser == nullptr 
+					|| pUser->isInTempleEventZone()
+					|| (ZoneID > 0 && pUser->GetZoneID() != ZoneID))
 					continue;
-
-				pRank->m_iLoyaltyDaily = 0;
-				pRank->m_iLoyaltyPremiumBonus;
+				
+				pRankInfo->m_iLoyaltyDaily = 0;
+				pRankInfo->m_iLoyaltyPremiumBonus = 0;
 				pUser->m_iLoyaltyDaily = 0;
 				pUser->m_iLoyaltyPremiumBonus = 0;
 			}
 		}
-	} else {
-		m_sRankResetHour++;
+
+		m_IsPlayerRankingUpdateProcess = false;
+		return;
 	}
+
+	 m_sRankResetHour++;
 }
 
 void CGameServerDlg::AddDatabaseRequest(Packet & pkt, CUser *pUser /*= nullptr*/)
@@ -1229,13 +1562,20 @@ void CGameServerDlg::UserInOutForMe(CUser *pSendUser)
 		GetRegionUserIn(pMap, rx + x, rz + z, result, user_count, pSendUser->GetEventRoom());
 
 	result.put(0, uint16(user_count));
-	pSendUser->SendCompressed(&result);
+
+	if (user_count < 500)
+		pSendUser->Send(&result);
+	else
+		pSendUser->SendCompressed(&result);
 }
 
 void CGameServerDlg::RegionUserInOutForMe(CUser *pSendUser)
 {
 	if (pSendUser == nullptr)
 		return;
+
+	Packet reflesh(WIZ_REGIONCHANGE, uint8(0));
+	pSendUser->SendCompressed(&reflesh);
 
 	Packet result(WIZ_REGIONCHANGE, uint8(1));
 	C3DMap* pMap = pSendUser->GetMap();
@@ -1248,21 +1588,32 @@ void CGameServerDlg::RegionUserInOutForMe(CUser *pSendUser)
 	foreach_region(x, z)
 		GetRegionUserList(pMap, rx + x, rz + z, result, user_count, pSendUser->GetEventRoom());
 
-	result.put(1, user_count);
-	pSendUser->SendCompressed(&result);
+	result.put(1, uint16(user_count));
+
+	if (user_count < 500)
+		pSendUser->Send(&result);
+	else
+		pSendUser->SendCompressed(&result);
+
+	Packet test(WIZ_REGIONCHANGE, uint8(2));
+	pSendUser->SendCompressed(&test);
 }
 
-void CGameServerDlg::GetRegionUserIn(C3DMap *pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, int16 nEventRoom)
+void CGameServerDlg::GetRegionUserIn(C3DMap *pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, uint16 nEventRoom)
 {
 	if (pMap == nullptr)
 		return;
 
-	FastGuard lock(pMap->m_lock);
+	Guard lock(pMap->m_lock);
 	CRegion *pRegion = pMap->GetRegion(region_x, region_z);
 	if (pRegion == nullptr)
 		return;
 
-	FastGuard lock2(pRegion->m_lock);
+	Guard lock2(pRegion->m_lock);
+	
+	if (pRegion->m_RegionUserArray.size() <= 0)
+		return;
+
 	foreach (itr, pRegion->m_RegionUserArray)
 	{
 		CUser *pUser = GetUserPtr(*itr);
@@ -1270,7 +1621,7 @@ void CGameServerDlg::GetRegionUserIn(C3DMap *pMap, uint16 region_x, uint16 regio
 			|| !pUser->isInGame())
 			continue;
 
-		if (nEventRoom != pUser->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pUser->GetEventRoom())
 			continue;
 
 		pkt << uint8(0) << pUser->GetSocketID();
@@ -1279,17 +1630,21 @@ void CGameServerDlg::GetRegionUserIn(C3DMap *pMap, uint16 region_x, uint16 regio
 	}
 }
 
-void CGameServerDlg::GetRegionUserList(C3DMap* pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, int16 nEventRoom)
+void CGameServerDlg::GetRegionUserList(C3DMap* pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, uint16 nEventRoom)
 {
 	if (pMap == nullptr)
 		return;
 
-	FastGuard lock(pMap->m_lock);
+	Guard lock(pMap->m_lock);
 	CRegion *pRegion = pMap->GetRegion(region_x, region_z);
 	if (pRegion == nullptr)
 		return;
 
-	FastGuard lock2(pRegion->m_lock);
+	Guard lock2(pRegion->m_lock);
+	
+	if (pRegion->m_RegionUserArray.size() <= 0)
+		return;
+
 	foreach (itr, pRegion->m_RegionUserArray)
 	{
 		CUser *pUser = GetUserPtr(*itr);
@@ -1297,7 +1652,7 @@ void CGameServerDlg::GetRegionUserList(C3DMap* pMap, uint16 region_x, uint16 reg
 			|| !pUser->isInGame())
 			continue;
 
-		if (nEventRoom != pUser->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pUser->GetEventRoom())
 			continue;
 
 		pkt << pUser->GetSocketID();
@@ -1322,20 +1677,27 @@ void CGameServerDlg::MerchantUserInOutForMe(CUser *pSendUser)
 		GetRegionMerchantUserIn(pMap, rx + x, rz + z, result, user_count, pSendUser->GetEventRoom());
 
 	result.put(1, user_count);
-	pSendUser->SendCompressed(&result);
+	if (user_count < 500)
+		pSendUser->Send(&result);
+	else
+		pSendUser->SendCompressed(&result);
 }
 
-void CGameServerDlg::GetRegionMerchantUserIn(C3DMap *pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, int16 nEventRoom)
+void CGameServerDlg::GetRegionMerchantUserIn(C3DMap *pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, uint16 nEventRoom)
 {
 	if (pMap == nullptr)
 		return;
 
-	FastGuard lock(pMap->m_lock);
+	Guard lock(pMap->m_lock);
 	CRegion *pRegion = pMap->GetRegion(region_x, region_z);
 	if (pRegion == nullptr)
 		return;
 
-	FastGuard lock2(pRegion->m_lock);
+	Guard lock2(pRegion->m_lock);
+	
+	if (pRegion->m_RegionUserArray.size() <= 0)
+		return;
+
 	foreach (itr, pRegion->m_RegionUserArray)
 	{
 		CUser *pUser = GetUserPtr(*itr);
@@ -1344,14 +1706,14 @@ void CGameServerDlg::GetRegionMerchantUserIn(C3DMap *pMap, uint16 region_x, uint
 			|| !pUser->isMerchanting())
 			continue;
 
-		if (nEventRoom != pUser->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pUser->GetEventRoom())
 			continue;
 
 		pkt << pUser->GetSocketID()
 			<< pUser->GetMerchantState() // 0 is selling, 1 is buying
-			<< pUser->m_bPremiumMerchant; // Type of merchant [normal - gold] // bool
+			<< (pUser->GetMerchantState() == 1 ? false : pUser->m_bPremiumMerchant); // Type of merchant [normal - gold] // bool
 
-		for (int i = 0, listCount = (pUser->m_bPremiumMerchant ? 8 : 4); i < listCount; i++)
+		for (int i = 0, listCount = (pUser->GetMerchantState() == 1 ? 4 : (pUser->m_bPremiumMerchant ? 8 : 4)); i < listCount; i++)
 			pkt << pUser->m_arMerchantItems[i].nNum;
 
 		t_count++;
@@ -1371,24 +1733,35 @@ void CGameServerDlg::NpcInOutForMe(CUser* pSendUser)
 
 	int16 rx = pSendUser->GetRegionX(), rz = pSendUser->GetRegionZ();
 	foreach_region(x, z)
-		GetRegionNpcIn(pMap, rx + x, rz + z, result, npc_count, pSendUser->GetEventRoom());
+		GetRegionNpcIn(pMap, rx + x, rz + z, result, npc_count, pSendUser->GetEventRoom(), pSendUser);
 
 	result.put(0, npc_count);
-	pSendUser->SendCompressed(&result);
+	if (npc_count < 500)
+		pSendUser->Send(&result);
+	else
+		pSendUser->SendCompressed(&result);
 }
 
-void CGameServerDlg::GetRegionNpcIn(C3DMap *pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, int16 nEventRoom)
+void CGameServerDlg::GetRegionNpcIn(C3DMap *pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, uint16 nEventRoom, CUser* pSendUser)
 {
 	if (!m_bPointCheckFlag
 		|| pMap == nullptr)
 		return;
 
-	FastGuard lock(pMap->m_lock);
+	Guard lock(pMap->m_lock);
 	CRegion * pRegion = pMap->GetRegion(region_x, region_z);
+
 	if (pRegion == nullptr)
 		return;
 
-	FastGuard lock2(pRegion->m_lock);
+	Guard lock2(pRegion->m_lock);
+
+	if (pRegion->m_RegionNpcArray.size() <= 0)
+		return;
+
+	CKnights *pKnights = g_pMain->GetClanPtr(pSendUser->m_bKnights);
+	_KNIGHTS_SIEGE_WARFARE *pSiegeWars = g_pMain->GetSiegeMasterKnightsPtr(1);
+
 	foreach (itr, pRegion->m_RegionNpcArray)
 	{
 		CNpc *pNpc = GetNpcPtr(*itr);
@@ -1396,9 +1769,19 @@ void CGameServerDlg::GetRegionNpcIn(C3DMap *pMap, uint16 region_x, uint16 region
 			|| pNpc->isDead())
 			continue;
 
-		if (nEventRoom != pNpc->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pNpc->m_bEventRoom && pNpc->GetProtoID() != SAW_BLADE_SSID)
 			continue;
 
+		if (pNpc->m_sSid == 541 && pNpc->GetType() == NPC_DESTROYED_ARTIFACT && pNpc->m_bZone == ZONE_DELOS)
+		{
+			if ( pKnights != nullptr && pSiegeWars != nullptr)
+			{
+				if ((pSiegeWars->sMasterKnights == pKnights->m_sAlliance && pKnights->m_sAlliance != 0 ) || pSiegeWars->sMasterKnights == pKnights->m_sIndex)
+					pNpc->m_bNation = 3;
+				else
+					pNpc->m_bNation = 0;
+			}
+		}
 		pkt << pNpc->GetID();
 		pNpc->GetNpcInfo(pkt);
 		t_count++;
@@ -1421,7 +1804,10 @@ void CGameServerDlg::RegionNpcInfoForMe(CUser *pSendUser)
 		GetRegionNpcList(pMap, rx + x, rz + z, result, npc_count, pSendUser->GetEventRoom());
 
 	result.put(0, npc_count);
-	pSendUser->SendCompressed(&result);
+	if (npc_count < 500)
+		pSendUser->Send(&result);
+	else
+		pSendUser->SendCompressed(&result);
 }
 
 void CGameServerDlg::GetUnitListFromSurroundingRegions(Unit * pOwner, std::vector<uint16> * pList)
@@ -1434,15 +1820,16 @@ void CGameServerDlg::GetUnitListFromSurroundingRegions(Unit * pOwner, std::vecto
 
 	int16 rx = pOwner->GetRegionX(), rz = pOwner->GetRegionZ();
 
-	FastGuard lock(pMap->m_lock);
+	Guard lock(pMap->m_lock);
 	foreach_region(x, z)
 	{
 		uint16 region_x = rx + x, region_z = rz + z;
 		CRegion * pRegion = pMap->GetRegion(region_x, region_z);
+
 		if (pRegion == nullptr)
 			continue;
 
-		FastGuard lock2(pRegion->m_lock);
+		Guard lock2(pRegion->m_lock);
 
 		// Add all potential NPCs to list
 		foreach (itr, pRegion->m_RegionNpcArray)
@@ -1454,25 +1841,29 @@ void CGameServerDlg::GetUnitListFromSurroundingRegions(Unit * pOwner, std::vecto
 	}
 }
 
-void CGameServerDlg::GetRegionNpcList(C3DMap *pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, int16 nEventRoom)
+void CGameServerDlg::GetRegionNpcList(C3DMap *pMap, uint16 region_x, uint16 region_z, Packet & pkt, uint16 & t_count, uint16 nEventRoom)
 {
 	if (!m_bPointCheckFlag
 		|| pMap == nullptr)
 		return;
 
-	FastGuard lock(pMap->m_lock);
+	Guard lock(pMap->m_lock);
 	CRegion * pRegion = pMap->GetRegion(region_x, region_z);
+
 	if (pRegion == nullptr)
 		return;
 
-	FastGuard lock2(pRegion->m_lock);
+	Guard lock2(pRegion->m_lock);
+	
+	if (pRegion->m_RegionNpcArray.size() <= 0)
+		return;
 	foreach (itr, pRegion->m_RegionNpcArray)
 	{
 		CNpc *pNpc = GetNpcPtr(*itr);
 		if (pNpc == nullptr || pNpc->isDead())
 			continue;
 
-		if (nEventRoom != pNpc->GetEventRoom())
+		if (nEventRoom > 0 && nEventRoom != pNpc->m_bEventRoom && pNpc->GetProtoID() != SAW_BLADE_SSID)
 			continue;
 
 		pkt << pNpc->GetID();
@@ -1532,6 +1923,43 @@ bool CGameServerDlg::LoadNoticeData()
 	return true;
 }
 
+bool CGameServerDlg::LoadNoticeUpData()
+{
+	ifstream file("./Notice_up.txt");
+	string line;
+	int count = 0;
+
+	// Clear out the notices first
+	memset(&m_peNotice, 0, sizeof(m_peNotice));
+
+	if (!file)
+	{
+		TRACE("Notice_up.txt could not be opened.\n");
+		return false;
+	}
+
+	while (!file.eof())
+	{
+		if (count > 19)
+		{
+			TRACE("Too many lines in Notice_up.txt\n");
+			break;
+		}
+
+		getline(file, line);
+		if (line.length() > 128)
+		{
+			TRACE("Notice_up.txt contains line that exceeds the limit of 128 characters.\n");
+			break;
+		}
+
+		strcpy(m_peNotice[count++], line.c_str());
+	}
+
+	file.close();
+	return true;
+}
+
 void CGameServerDlg::SendAllUserInfo()
 {
 	Packet result(AG_USER_INFO_ALL);
@@ -1539,7 +1967,7 @@ void CGameServerDlg::SendAllUserInfo()
 	result << count; // placeholder for user count
 	const int tot = 20;
 
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		TO_USER(itr->second)->GetUserInfoForAI(result);
@@ -1550,7 +1978,6 @@ void CGameServerDlg::SendAllUserInfo()
 			result.clear();
 		}
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 
 	if (count != 0 && count < (tot - 1))
 	{
@@ -1585,7 +2012,7 @@ void CGameServerDlg::DeleteAllNpcList(int flag)
 	TRACE("*** DeleteAllNpcList - Start *** \n");
 
 	// Remove spawns from users to prevent them from getting bugged...
-	m_arNpcArray.m_lock.Acquire();
+	m_arNpcArray.m_lock.lock();
 	foreach_stlmap_nolock (itr, m_arNpcArray)
 	{
 		if (itr->second->isAlive())
@@ -1597,7 +2024,7 @@ void CGameServerDlg::DeleteAllNpcList(int flag)
 
 	// all the data should now be freed (if not, it will be by whatever's using it)
 	m_arNpcArray.m_UserTypeMap.clear();
-	m_arNpcArray.m_lock.Release();
+	m_arNpcArray.m_lock.unlock();
 
 	// Now remove all spawns from all regions
 	foreach_stlmap (itr, m_ZoneArray)
@@ -1606,7 +2033,7 @@ void CGameServerDlg::DeleteAllNpcList(int flag)
 		if (pMap == nullptr)
 			continue;
 
-		FastGuard lock(pMap->m_lock);
+		Guard lock(pMap->m_lock);
 		for (int i = 0; i < pMap->GetXRegionMax(); i++)
 		{
 			for (int j = 0; j < pMap->GetZRegionMax(); j++)
@@ -1632,7 +2059,7 @@ CNpc*  CGameServerDlg::FindNpcInZone(uint16 sPid, uint8 byZone)
 	if (!m_bPointCheckFlag)
 		return nullptr;
 
-	FastGuard lock(m_arNpcArray.m_lock);
+	Guard lock(m_arNpcArray.m_lock);
 	foreach_stlmap (itr, m_arNpcArray)
 	{
 		CNpc * pNpc = itr->second;
@@ -1654,10 +2081,10 @@ void CGameServerDlg::BattleZoneOpenTimer()
 {
 	int nWeekDay = g_localTime.tm_wday;
 	int nHour = g_localTime.tm_hour;
-
-	if (m_byBattleOpen == NO_BATTLE)
+	int nMin = g_localTime.tm_min;
+	if (!isWarOpen() && nMin == 0)
 	{
-		std::list<std::string> vargs = StrSplit(m_nBattleZoneOpenDays, ",");
+		std::list<std::string> vargs = StrSplit(m_sBattleZoneOpenDays, ",");
 		uint8 nDaySize = vargs.size();
 		if (nDaySize > 0)
 		{
@@ -1666,9 +2093,13 @@ void CGameServerDlg::BattleZoneOpenTimer()
 			{
 				nDay = atoi(vargs.front().c_str());
 				if (nDay == nWeekDay)
+				{
 					for (int x = 0; x < WAR_TIME_COUNT; x++)
-						if (m_nBattleZoneOpenHourStart[x] == nHour)
+					{
+						if (m_nBattleZoneOpenHourStart[x] == nHour && nMin == 0)
 							BattleZoneOpen(BATTLEZONE_OPEN, m_nBattlezoneOpenWarZone[x]);
+					}
+				}
 				vargs.pop_front();
 			}
 		}
@@ -1687,9 +2118,9 @@ void CGameServerDlg::BattleZoneOpenTimer()
 			{
 				m_KnightsRatingArray[KARUS_ARRAY].DeleteAllData();
 				m_KnightsRatingArray[ELMORAD_ARRAY].DeleteAllData();
-				LoadKnightsRankTable(true);
+				LoadKnightsRankTable(true, true);
 			}
-			else if (WarElapsedTime == (m_byBattleTime / 8)) // War half time + 15 minutes for Nereid's Island.
+			else if (WarElapsedTime == (m_byBattleTime / 8) && nBattleZone == ZONE_BATTLE4) // War half time + 15 minutes for Nereid's Island.
 			{
 				if (nBattleZone == ZONE_BATTLE4) // Nereid's Island
 				{
@@ -1735,10 +2166,72 @@ void CGameServerDlg::BattleZoneOpenTimer()
 			}
 		}
 
+		if (m_bResultDelay)
+		{
+			m_sBattleResultDelay++;
+			if (m_sBattleResultDelay == (m_byBattleTime  / (m_byBattleTime / 10))) 
+			{
+				m_bResultDelay = false;
+				BattleZoneResult(m_bResultDelayVictory);
+			}
+		}
+
 		if (WarElapsedTime >= m_byBattleTime) // War is over.
 			BattleZoneClose();
 	}
-
+	else if (m_byBattleOpen == CLAN_BATTLE)
+	{
+		if (m_byBattleSiegeWarStartTime == 0)
+		{
+			m_sBattleTimeDelay++;
+		}
+		else if (m_byBattleSiegeWarStartTime > 0)
+		{
+			if (m_byBattleSiegeWarStartTime == (3 * MINUTE))
+			{
+				m_SiegeWarNoticeTime = 3;
+				Announcement(IDS_SIEGE_WAR_TIME_NOTICE);
+				KickOutZoneUsers(ZONE_DELOS, ZONE_MORADON);
+			}
+			else if (m_byBattleSiegeWarStartTime == (2 * MINUTE))
+			{
+				m_SiegeWarNoticeTime = 2;
+				Announcement(IDS_SIEGE_WAR_TIME_NOTICE);
+				KickOutZoneUsers(ZONE_DELOS, ZONE_MORADON);
+			}
+			else if (m_byBattleSiegeWarStartTime == (1 * MINUTE))
+			{
+				m_SiegeWarNoticeTime = 1;
+				Announcement(IDS_SIEGE_WAR_TIME_NOTICE);
+				KickOutZoneUsers(ZONE_DELOS, ZONE_MORADON);
+			}
+			else if (m_byBattleSiegeWarStartTime == 1)
+			{
+					Announcement(IDS_SIEGE_WAR_START);
+					KickOutZoneUsers(ZONE_DELOS, ZONE_MORADON);
+					m_byBattleSiegeWarTeleport = true;
+			}
+			m_byBattleSiegeWarStartTime--;
+		}
+		if( m_sBattleTimeDelay == ( 1 * HOUR ) && !m_byBattleSiegeWarMomument)
+		{
+			Announcement(IDS_SIEGE_WAR_END);
+			m_sBattleTimeDelay = 0;
+			m_byBattleOpen = NO_BATTLE;
+			BattleZoneClose();
+			m_byBattleSiegeWarOpen = false;
+			Announcement(IDS_SIEGE_WAR_VICTORY);
+		}
+		else if( m_sBattleTimeDelay == ( 2 * HOUR ) && m_byBattleSiegeWarMomument)
+		{
+			Announcement(IDS_SIEGE_WAR_END);
+			m_sBattleTimeDelay = 0;
+			m_byBattleOpen = NO_BATTLE;
+			BattleZoneClose();
+			m_byBattleSiegeWarOpen = false;
+			Announcement(IDS_SIEGE_WAR_VICTORY);
+		}
+	}
 	if (m_byBanishFlag)
 	{
 		m_sBanishDelay++;
@@ -1753,11 +2246,37 @@ void CGameServerDlg::BattleZoneOpenTimer()
 	}
 }
 
-void CGameServerDlg::BattleZoneResult(uint8 nation)
+void CGameServerDlg::BattleZoneResult(uint8 nation, CUser* pUser)
 {
 	m_bVictory = nation;
 	Announcement(DECLARE_WINNER, m_bVictory);
 	Announcement(DECLARE_LOSER, nation == KARUS ? ELMORAD : KARUS);
+
+	g_pMain->m_byOldVictory = m_bVictory;
+
+	if (pUser == nullptr)
+		return;
+
+	Packet result(WIZ_BATTLE_EVENT, uint8(1));
+	result << g_pMain->m_byOldVictory << pUser->GetName() ;
+	g_pMain->AddDatabaseRequest(result, pUser);
+
+	/*if (g_pMain->m_bResultDelayVictory == ELMORAD)
+	{
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE,KARUS,KARUS);
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE2,KARUS,KARUS);
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE3,KARUS,KARUS);
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE6,KARUS,KARUS);
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE4,KARUS,KARUS);
+	}
+	else if(g_pMain->m_bResultDelayVictory == KARUS)
+	{
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE,ELMORAD,ELMORAD);
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE2,ELMORAD,ELMORAD);
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE3,ELMORAD,ELMORAD);
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE6,ELMORAD,ELMORAD);
+		g_pMain->KickOutZoneUsers(ZONE_BATTLE4,ELMORAD,ELMORAD);
+	}*/
 
 	if (g_pMain->m_byBattleZoneType == ZONE_ARDREAM)
 	{
@@ -1832,7 +2351,7 @@ void CGameServerDlg::BattleWinnerResult(BattleWinnerTypes winnertype)
 
 void CGameServerDlg::BattleZoneOpen(int nType, uint8 bZone /*= 0*/)
 {
-	if ((nType == BATTLEZONE_OPEN || nType == SNOW_BATTLEZONE_OPEN) && m_byBattleOpen == NO_BATTLE)
+	if ((nType == BATTLEZONE_OPEN || nType == SNOW_BATTLEZONE_OPEN) && !g_pMain->isWarOpen())
 	{
 		m_byBattleOpen = nType == BATTLEZONE_OPEN ? NATION_BATTLE : SNOW_BATTLE;	
 		m_byOldBattleOpen = nType == BATTLEZONE_OPEN ? NATION_BATTLE : SNOW_BATTLE;
@@ -1853,25 +2372,98 @@ void CGameServerDlg::BattleZoneOpen(int nType, uint8 bZone /*= 0*/)
 			KickOutZoneUsers(ZONE_KROWAZ_DOMINION);
 		}
 	}
-	else if (nType == BATTLEZONE_CLOSE && m_byBattleOpen != NO_BATTLE)
+	else if (nType == BATTLEZONE_CLOSE && isWarOpen())
 		Announcement(BATTLEZONE_CLOSE);
+	else if (nType == SNOW_BATTLEZONE_CLOSE && isWarOpen())
+		Announcement(SNOW_BATTLEZONE_CLOSE);
 	else
 		return;
 
+	LunarGoldShells();
 	Announcement(nType);	// Send an announcement out that the battlezone is open/closed.
 	Packet result(AG_BATTLE_EVENT, uint8(BATTLE_EVENT_OPEN));
 	result << uint8(nType);
 	Send_AIServer(&result);
 }
 
-void CGameServerDlg::BattleZoneClose()
+void CGameServerDlg::SnowBattleZoneClose()
 {
-	BattleZoneOpen(BATTLEZONE_CLOSE);
+	BattleZoneOpen(SNOW_BATTLEZONE_CLOSE);
 	Packet result(AG_BATTLE_EVENT, uint8(BATTLE_EVENT_OPEN));
-	result << uint8(BATTLEZONE_CLOSE);
+	result << uint8(SNOW_BATTLEZONE_CLOSE);
 	Send_AIServer(&result);
 	ResetBattleZone();
-	m_byBanishFlag = true;
+	m_bySnowBanishFlag = true;
+}
+void CGameServerDlg::SnowBanishLosers()
+{
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	foreach (itr, sessMap)
+	{
+		CUser *pUser = TO_USER(itr->second); 
+		if (!pUser->isInGame())
+			continue;
+
+		// Reset captains
+		if (!isWarOpen())
+		{
+			if (pUser->GetFame() == COMMAND_CAPTAIN)
+				pUser->ChangeFame(CHIEF);
+		}
+
+		if (m_byBattleOpen == SNOW_BATTLE)
+		{
+			// Kick out losers
+			if (pUser->GetMap()->isWarZone() && m_bVictory != pUser->GetNation())
+				pUser->KickOutZoneUser(true);
+		}
+		else if (!g_pMain->isWarOpen())
+		{
+			// Kick out invaders
+			if ((pUser->GetZoneID() <= ELMORAD && pUser->GetZoneID() != pUser->GetNation())
+				|| pUser->GetMap()->isWarZone())
+				   pUser->KickOutZoneUser(true);
+		}
+	}
+}
+void CGameServerDlg::CastleSiegeWarZoneOpen(int nType, uint8 bZone /*= 0*/)
+{
+	m_byBattleOpen = nType;	
+	m_byOldBattleOpen = nType;
+	m_byBattleZone = bZone;
+	m_byBattleOpenedTime = int32(UNIXTIME);		
+	m_byBattleRemainingTime = m_byBattleTime;
+	m_byBattleSiegeWarStartTime = 10 * MINUTE;
+	m_SiegeWarNoticeTime = 10;
+	m_byBattleSiegeWarOpen = true;
+	KickOutZoneUsers(ZONE_DELOS, ZONE_MORADON);	
+	Announcement(IDS_SIEGE_WAR_TIME_NOTICE);
+	Packet result(AG_BATTLE_EVENT, uint8(BATTLE_EVENT_OPEN));
+	result << uint8(nType);
+	Send_AIServer(&result);
+}
+void CGameServerDlg::BattleZoneClose()
+{
+	if (m_byBattleOpen == CLAN_BATTLE)
+	{
+		Announcement(IDS_SIEGE_WAR_END);
+		Packet result(AG_BATTLE_EVENT, uint8(BATTLE_EVENT_OPEN));
+		result << uint8(BATTLEZONE_CLOSE);
+		Send_AIServer(&result);
+		ResetBattleZone();
+		m_byBanishFlag = true;
+		KickOutZoneUsers(ZONE_DELOS, ZONE_MORADON);	
+	}
+	else
+	{
+		BattleZoneOpen(BATTLEZONE_CLOSE);
+		Packet result(AG_BATTLE_EVENT, uint8(BATTLE_EVENT_OPEN));
+		result << uint8(BATTLEZONE_CLOSE);
+		Send_AIServer(&result);
+		ResetBattleZone();
+		DeleteLunarGoldShells();
+		m_byBanishFlag = true;
+	}
 }
 
 void CGameServerDlg::BattleZoneVictoryCheck()
@@ -1885,7 +2477,7 @@ void CGameServerDlg::BattleZoneVictoryCheck()
 
 	Announcement(DECLARE_WINNER);
 
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser* pTUser = TO_USER(itr->second);
@@ -1908,7 +2500,6 @@ void CGameServerDlg::BattleZoneVictoryCheck()
 		// Make the winning nation use a victory emotion (yay!)
 		pTUser->StateChangeServerDirect(4, 12);
 	}	
-	g_pMain->m_socketMgr.ReleaseLock();
 }
 
 /**
@@ -1917,7 +2508,7 @@ void CGameServerDlg::BattleZoneVictoryCheck()
 **/
 void CGameServerDlg::BanishLosers()
 {
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser *pUser = TO_USER(itr->second); 
@@ -1925,7 +2516,7 @@ void CGameServerDlg::BanishLosers()
 			continue;
 
 		// Reset captains
-		if (m_byBattleOpen == NO_BATTLE)
+		if (!isWarOpen())
 		{
 			if (pUser->GetFame() == COMMAND_CAPTAIN)
 				pUser->ChangeFame(CHIEF);
@@ -1937,7 +2528,7 @@ void CGameServerDlg::BanishLosers()
 			if (pUser->GetMap()->isWarZone() && m_bVictory != pUser->GetNation())
 				pUser->KickOutZoneUser(true);
 		}
-		else if (m_byBattleOpen == NO_BATTLE)
+		else if (!g_pMain->isWarOpen())
 		{
 			// Kick out invaders
 			if ((pUser->GetZoneID() <= ELMORAD && pUser->GetZoneID() != pUser->GetNation())
@@ -1945,7 +2536,6 @@ void CGameServerDlg::BanishLosers()
 				pUser->KickOutZoneUser(true);
 		}
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 }
 
 void CGameServerDlg::ResetBattleZone()
@@ -1954,6 +2544,9 @@ void CGameServerDlg::ResetBattleZone()
 
 	m_sBanishDelay = 0;
 	m_byBanishFlag = false;
+
+	m_sBattleResultDelay = 0;
+	m_bResultDelay = false;
 
 	m_bKarusFlag = 0;
 	m_bElmoradFlag = 0;
@@ -1972,6 +2565,13 @@ void CGameServerDlg::ResetBattleZone()
 	m_byBattleOpenedTime = 0;
 	m_byBattleRemainingTime = 0;
 	m_sBattleTimeDelay = 0;
+	m_byBattleSiegeWarStartTime = 0;
+
+	m_SiegeWarNoticeTime = 0;
+	
+	m_byBattleSiegeWarOpen = false;
+	m_byBattleSiegeWarMomument = false;	
+	m_byBattleSiegeWarTeleport = false;
 
 	m_sKarusDead = 0;
 	m_sElmoradDead = 0;
@@ -1986,74 +2586,751 @@ void CGameServerDlg::ResetBattleZone()
 	m_sElmoMonumentPoint = 0;
 	m_sKarusMonuments = 0;
 	m_sElmoMonuments = 0;
-
+	m_sKarusBdw = 0;
+	m_sElmoBdw = 0;
 	m_NationMonumentInformationArray.DeleteAllData();
 	m_bMiddleStatueNation = 0;
 }
 
-void CGameServerDlg::TempleEventTimer()
+void CGameServerDlg::ForgettenTempleEventTimer()
 {
-	return;
 	uint32 nHour = g_localTime.tm_hour;
 	uint32 nMinute = g_localTime.tm_min;
+	uint32 nSecond = g_localTime.tm_sec;
+
+	if (!m_bForgettenTempleIsActive)
+	{
+		foreach_stlmap_nolock (itr, m_MonsterChallengeArray)
+		{	
+			if ((nHour == itr->second->bStartTime1 - 1
+				|| nHour == itr->second->bStartTime2 - 1
+				|| nHour == itr->second->bStartTime3 - 1) && nMinute == 55 && nSecond == 0)
+			{
+				if (nHour + 1 == itr->second->bStartTime1)
+					m_nForgettenTempleStartHour = itr->second->bStartTime1;
+				else if (nHour + 1 == itr->second->bStartTime2)
+					m_nForgettenTempleStartHour = itr->second->bStartTime2;
+				else if (nHour + 1 == itr->second->bStartTime3)
+					m_nForgettenTempleStartHour = itr->second->bStartTime3;
+
+				m_nForgettenTempleLevelMin = itr->second->bLevelMin;
+				m_nForgettenTempleLevelMax = itr->second->bLevelMax;
+
+				Announcement(IDS_MONSTER_CHALLENGE_ANNOUNCEMENT);
+			}
+			else if ((nHour == itr->second->bStartTime1 - 1
+				|| nHour == itr->second->bStartTime2 - 1
+				|| nHour == itr->second->bStartTime3 - 1) && nMinute == 59 && nSecond == 40)
+			{
+				m_nForgettenTempleLevelMin = itr->second->bLevelMin;
+				m_nForgettenTempleLevelMax = itr->second->bLevelMax;
+				Announcement(IDS_MONSTER_CHALLENGE_ANNOUNCEMENT);
+			}
+			else if ((nHour == itr->second->bStartTime1
+				|| nHour == itr->second->bStartTime2
+				|| nHour == itr->second->bStartTime3) && nMinute == 0)
+			{
+				if (itr->second->bLevelMin == 30)	
+					m_nForgettenTempleChallengeTime = 1;
+				else if (itr->second->bLevelMin == 46)
+					m_nForgettenTempleChallengeTime = 2;
+				else if (itr->second->bLevelMin == 60)
+					m_nForgettenTempleChallengeTime = 3;
+			}
+		}
+
+		if (m_nForgettenTempleChallengeTime > 0)
+		{
+			m_bForgettenTempleIsActive = true;
+			m_nForgettenTempleStartTime = int32(UNIXTIME);
+
+			foreach_stlmap_nolock (itr, m_MonsterChallengeSummonListArray)
+				if (itr->second->bLevel == m_nForgettenTempleChallengeTime)
+					m_nForgettenTempleLastStage++;
+
+			if(m_nForgettenTempleLastStage>56)
+				m_nForgettenTempleLastStage=56;
+
+			Announcement(IDS_MONSTER_CHALLENGE_OPEN);
+		}
+	}
+	else if (m_bForgettenTempleIsActive)
+	{
+		if (int32(UNIXTIME) - m_nForgettenTempleStartTime == 300 /* 5 minutes */
+			&& !m_bForgettenTempleSummonMonsters)
+		{
+			m_bForgettenTempleSummonMonsters = true;
+			m_nForgettenTempleCurrentStage = 1;
+			m_nForgettenTempleLastSummonTime = int32(UNIXTIME) + 30;
+			Announcement(IDS_MONSTER_CHALLENGE_START);
+		}
+		else if (m_bForgettenTempleSummonMonsters)
+		{
+			foreach_stlmap_nolock (itr, m_MonsterChallengeSummonListArray)
+			{
+				if (m_nForgettenTempleChallengeTime != itr->second->bLevel
+					|| int32(UNIXTIME) - m_nForgettenTempleLastSummonTime < 45
+					|| itr->second->bStage != m_nForgettenTempleCurrentStage
+					&& m_nForgettenTempleCurrentStage != 57)
+					continue;
+
+				if (m_nForgettenTempleCurrentStage > m_nForgettenTempleLastStage)
+					m_bForgettenTempleSummonMonsters = false;
+				else
+				{
+					SpawnEventNpc(itr->second->sSid,true,ZONE_FORGOTTEN_TEMPLE,(float)itr->second->sPosX,0,(float)itr->second->sPosZ,itr->second->sCount,itr->second->bRange);
+					m_nForgettenTempleCurrentStage++;
+					m_nForgettenTempleLastSummonTime = int32(UNIXTIME);
+				}
+			}
+		}
+		else
+		{
+			if (m_nForgettenTempleCurrentStage > m_nForgettenTempleLastStage && !m_nForgettenTempleBanishFlag) 
+			{
+				if (m_ForgettenTempleMonsterList.size() == 0)
+				{
+					m_nForgettenTempleBanishFlag = true;
+					m_nForgettenTempleBanishTime = 200;
+					Announcement(IDS_MONSTER_CHALLENGE_VICTORY);
+					switch(m_nForgettenTempleChallengeTime)
+					{
+						case 1:
+					SendItemZoneUsers(ZONE_FORGOTTEN_TEMPLE, RED_TREASURE_CHEST);
+					break;
+						case 2:
+					SendItemZoneUsers(ZONE_FORGOTTEN_TEMPLE, GREEN_TREASURE_CHEST);
+					break;
+						case 3:
+					SendItemZoneUsers(ZONE_FORGOTTEN_TEMPLE, KNIGHT_MEDAL);
+					SendItemZoneUsers(ZONE_FORGOTTEN_TEMPLE, BLUE_TREASURE_CHEST,2);
+					break;
+					}
+				}
+				else if (int32(UNIXTIME) - m_nForgettenTempleStartTime >= (HOUR - (10 * MINUTE)))
+				{
+					m_nForgettenTempleBanishFlag = true;
+					m_nForgettenTempleBanishTime = 0;
+				}
+			}
+		}
+
+		if (m_nForgettenTempleBanishFlag)
+		{
+			m_nForgettenTempleBanishTime++;
+
+			if (m_nForgettenTempleBanishTime == 30 /* 30 seconds */)
+				Announcement(IDS_MONSTER_CHALLENGE_CLOSE);
+			else if (m_nForgettenTempleBanishTime == 230 /* 5 minutes */)
+			{
+				m_nForgettenTempleBanishFlag = false;
+				m_nForgettenTempleBanishTime = 0;
+
+				m_nForgettenTempleUsers.clear();
+				m_bForgettenTempleIsActive = false;
+				m_nForgettenTempleStartHour = 0;
+				m_nForgettenTempleLevelMin = 0;
+				m_nForgettenTempleLevelMax = 0;
+				m_nForgettenTempleStartTime = 0;
+				m_nForgettenTempleChallengeTime = 0;
+				m_bForgettenTempleSummonMonsters = false;
+				m_nForgettenTempleCurrentStage = 0;
+				m_nForgettenTempleLastStage = 0;
+
+				foreach (itr, m_ForgettenTempleMonsterList)
+					KillNpc(itr->first);
+
+				m_ForgettenTempleMonsterList.clear();
+				m_nForgettenTempleLastSummonTime = 0;
+
+				SendItemZoneUsers(ZONE_FORGOTTEN_TEMPLE, GOLD_EAGLE_WINGS, 1, 1);
+				KickOutZoneUsers(ZONE_FORGOTTEN_TEMPLE);
+			}
+		}
+	}
+}
+
+void CGameServerDlg::EventZoneTimer()
+{
+	int nWeekDay = g_localTime.tm_wday;
+	uint32 nHour = g_localTime.tm_hour;
+	uint32 nMinute = g_localTime.tm_min;
+	uint32 nSecond = g_localTime.tm_sec;
+
+	if (!m_bEventZoneIsActive)
+	{
+		foreach_stlmap_nolock (itr, m_EventTimesArray)
+		{	
+			std::list<std::string> vargs1 = StrSplit(m_sEventZoneOpenDays1, ",");
+			std::list<std::string> vargs2 = StrSplit(m_sEventZoneOpenDays2, ",");
+			std::list<std::string> vargs3 = StrSplit(m_sEventZoneOpenDays3, ",");
+			uint8 nDaySize1 = vargs1.size();
+			uint8 nDaySize2 = vargs2.size();
+			uint8 nDaySize3 = vargs3.size();
+			std::string sEventStart;
+			std::string sPvpMiniStart;
+			std::string sJuradEventStart;
+			std::string sEventName;
+
+			if (itr->second->sIndex == 1)
+				sEventName = "Dark Land";
+			if (itr->second->sIndex == 2)
+				sEventName = "Mini PVP Zone";
+			if (itr->second->sIndex == 3)
+				sEventName = "Devils Square";
+			if (itr->second->sIndex == 4)
+				sEventName = "Lost Castle";
+			if (itr->second->sIndex == 5)
+				sEventName = "PVP Zone";
+			if (itr->second->sIndex == 6)
+				sEventName = "Jurad Mountain";
+			
+			sPvpMiniStart = string_format("%s will open at %d(GMT+2).Max level 45. To enter talk with npc [Exclusive Events] Nian.",sEventName.c_str(),m_nEventZoneStartHour);
+			sEventStart = string_format("%s will open at %d(GMT+2).Min level 70. To enter talk with npc [Exclusive Events] Nian.",sEventName.c_str(),m_nEventZoneStartHour);
+			sJuradEventStart = string_format("%s will open at %d(GMT+2).Min level 70. Only users in Eslant will be automatically teleported!",sEventName.c_str(),m_nEventZoneStartHour);
+			
+			if (nDaySize1 > 0 && itr->second->AllDays == 0 && itr->second->sIndex == 5)
+			{
+				uint8 nDay1 = 0;
+				for (int i = 0; i < nDaySize1; i++)
+				{
+					nDay1 = atoi(vargs1.front().c_str());
+					if (nWeekDay == nDay1)
+					{
+						if ((nHour == itr->second->bTime1 - 1
+							|| nHour == itr->second->bTime2 - 1
+							|| nHour == itr->second->bTime3 - 1) && nMinute == 55 && nSecond == 0)
+						{
+							if (nHour + 1 == itr->second->bTime1)
+								m_nEventZoneStartHour = itr->second->bTime1;
+							else if (nHour + 1 == itr->second->bTime2)
+								m_nEventZoneStartHour = itr->second->bTime2;
+							else if (nHour + 1 == itr->second->bTime3)
+								m_nEventZoneStartHour = itr->second->bTime3;
+							
+							m_nEventZoneLevelMin = itr->second->bLvMin;
+							m_nEventZoneLevelMax = itr->second->bLvMax;
+							SendAnnouncement(sEventStart.c_str());
+						}
+						else if ((nHour == itr->second->bTime1 - 1
+							|| nHour == itr->second->bTime2 - 1
+							|| nHour == itr->second->bTime3 - 1) && nMinute == 59 && nSecond == 40)
+						{
+							m_nEventZoneLevelMin = itr->second->bLvMin;
+							m_nEventZoneLevelMax = itr->second->bLvMax;
+							SendAnnouncement(sEventStart.c_str());
+						}
+
+						else if ((nHour == itr->second->bTime1
+							|| nHour == itr->second->bTime2
+							|| nHour == itr->second->bTime3) && nMinute == 0)
+						{
+							if (itr->second->bLvMin == 50)
+								m_nEventZoneTime = 5;
+						}
+					}
+					vargs1.pop_front();
+				}
+			}
+
+			else if (nDaySize2 > 0 && itr->second->sIndex == 3 && itr->second->AllDays == 0)
+			{
+				uint8 nDay2 = 0;
+				for (int i = 0; i < nDaySize2; i++)
+				{
+					nDay2 = atoi(vargs2.front().c_str());
+					if (nWeekDay == nDay2)
+					{
+						if ((nHour == itr->second->bTime1 - 1
+							|| nHour == itr->second->bTime2 - 1
+							|| nHour == itr->second->bTime3 - 1) && nMinute == 55 && nSecond == 0)
+						{
+							if (nHour + 1 == itr->second->bTime1)
+								m_nEventZoneStartHour = itr->second->bTime1;
+							else if (nHour + 1 == itr->second->bTime2)
+								m_nEventZoneStartHour = itr->second->bTime2;
+							else if (nHour + 1 == itr->second->bTime3)
+								m_nEventZoneStartHour = itr->second->bTime3;
+
+							m_nEventZoneLevelMin = itr->second->bLvMin;
+							m_nEventZoneLevelMax = itr->second->bLvMax;
+							SendAnnouncement(sEventStart.c_str());
+						}
+						else if ((nHour == itr->second->bTime1 - 1
+							|| nHour == itr->second->bTime2 - 1
+							|| nHour == itr->second->bTime3 - 1) && nMinute == 59 && nSecond == 40)
+						{
+							m_nEventZoneLevelMin = itr->second->bLvMin;
+							m_nEventZoneLevelMax = itr->second->bLvMax;
+							SendAnnouncement(sEventStart.c_str());
+						}
+
+						else if ((nHour == itr->second->bTime1
+							|| nHour == itr->second->bTime2
+							|| nHour == itr->second->bTime3) && nMinute == 0)
+						{
+							if (itr->second->bLvMin == 30)
+								m_nEventZoneTime = 3;
+						}
+					}
+					vargs2.pop_front();
+				}
+			}
+			
+			else if (nDaySize3 > 0 && itr->second->sIndex == 4 && itr->second->AllDays == 0)
+			{
+				uint8 nDay3 = 0;
+				for (int i = 0; i < nDaySize3; i++)
+				{
+					nDay3 = atoi(vargs3.front().c_str());
+					if (nWeekDay == nDay3)
+					{
+						if ((nHour == itr->second->bTime1 - 1
+							|| nHour == itr->second->bTime2 - 1
+							|| nHour == itr->second->bTime3 - 1) && nMinute == 55 && nSecond == 0)
+						{
+							if (nHour + 1 == itr->second->bTime1)
+								m_nEventZoneStartHour = itr->second->bTime1;
+							else if (nHour + 1 == itr->second->bTime2)
+								m_nEventZoneStartHour = itr->second->bTime2;
+							else if (nHour + 1 == itr->second->bTime3)
+								m_nEventZoneStartHour = itr->second->bTime3;
+							
+							m_nEventZoneLevelMin = itr->second->bLvMin;
+							m_nEventZoneLevelMax = itr->second->bLvMax;
+							SendAnnouncement(sEventStart.c_str());
+						}
+						else if ((nHour == itr->second->bTime1 - 1
+							|| nHour == itr->second->bTime2 - 1
+							|| nHour == itr->second->bTime3 - 1) && nMinute == 59 && nSecond == 40)
+						{
+							m_nEventZoneLevelMin = itr->second->bLvMin;
+							m_nEventZoneLevelMax = itr->second->bLvMax;
+							SendAnnouncement(sEventStart.c_str());
+						}
+
+						else if ((nHour == itr->second->bTime1
+							|| nHour == itr->second->bTime2
+							|| nHour == itr->second->bTime3) && nMinute == 0)
+						{
+							if (itr->second->bLvMin == 40)
+								m_nEventZoneTime = 4;
+						}
+					}
+					vargs3.pop_front();
+				}
+			}
+			
+			else if (itr->second->AllDays == 1)
+			{
+				if ((nHour == itr->second->bTime1 - 1
+					|| nHour == itr->second->bTime2 - 1
+					|| nHour == itr->second->bTime3 - 1) && nMinute == 55 && nSecond == 0)
+				{
+					if (nHour + 1 == itr->second->bTime1)
+						m_nEventZoneStartHour = itr->second->bTime1;
+					else if (nHour + 1 == itr->second->bTime2)
+						m_nEventZoneStartHour = itr->second->bTime2;
+					else if (nHour + 1 == itr->second->bTime3)
+						m_nEventZoneStartHour = itr->second->bTime3;
+					
+					m_nEventZoneLevelMin = itr->second->bLvMin;
+					m_nEventZoneLevelMax = itr->second->bLvMax;
+					if (itr->second->sIndex == 1)
+						SendAnnouncement(sEventStart.c_str());
+					else if (itr->second->sIndex == 2)
+					{
+						SendAnnouncement(sPvpMiniStart.c_str());
+						SendNotice(sPvpMiniStart.c_str());
+					}
+					else
+					{
+						SendAnnouncement(sJuradEventStart.c_str());
+						SendNotice(sJuradEventStart.c_str());
+					}
+				}
+				else if ((nHour == itr->second->bTime1 - 1
+					|| nHour == itr->second->bTime2 - 1
+					|| nHour == itr->second->bTime3 - 1) && nMinute == 59 && nSecond == 40)
+				{
+					m_nEventZoneLevelMin = itr->second->bLvMin;
+					m_nEventZoneLevelMax = itr->second->bLvMax;
+					if (itr->second->sIndex == 1)
+						SendAnnouncement(sEventStart.c_str());
+					else if (itr->second->sIndex == 2)
+					{
+						SendAnnouncement(sPvpMiniStart.c_str());
+						SendNotice(sPvpMiniStart.c_str());
+					}
+					else
+					{
+						SendAnnouncement(sJuradEventStart.c_str());
+						SendNotice(sJuradEventStart.c_str());
+					}
+				}
+
+				else if ((nHour == itr->second->bTime1
+					|| nHour == itr->second->bTime2
+					|| nHour == itr->second->bTime3) && nMinute == 0)
+				{
+					if (itr->second->bLvMin == 10)	
+						m_nEventZoneTime = 1;
+					else if (itr->second->bLvMin == 20)
+						m_nEventZoneTime = 2;
+					else if (itr->second->bLvMin == 60)
+						m_nEventZoneTime = 6;
+				}
+			}
+		}
+		
+		if (m_nEventZoneTime > 0)
+		{
+			m_bEventZoneIsActive = true;
+			m_nEventZoneStartTime = int32(UNIXTIME);
+
+			Announcement(IDS_EVENT_ZONE_OPEN);
+
+			if (m_nEventZoneTime == 5)
+				KickOutZoneUsers(ZONE_RONARK_LAND);
+			else if (m_nEventZoneTime == 6)
+			{
+				KickOutZoneUsers(ZONE_ELMORAD_ESLANT,ZONE_JURAD_MOUNTAIN);
+				KickOutZoneUsers(ZONE_KARUS_ESLANT,ZONE_JURAD_MOUNTAIN);
+			}
+		}
+	}
+	else if (m_bEventZoneIsActive)
+	{
+		if (int32(UNIXTIME) - m_nEventZoneStartTime == 120) /* 2 minutes */
+		{
+			Announcement(IDS_EVENT_ZONE_START);
+		}
+		else if (!m_nEventZoneBanishFlag
+			&& (((m_nEventZoneTime == 6 || m_nEventZoneTime == 4) && (int32(UNIXTIME) - m_nEventZoneStartTime >= (29 * MINUTE)))
+			|| (m_nEventZoneTime != 6 && m_nEventZoneTime != 4 && (int32(UNIXTIME) - m_nEventZoneStartTime >= (44 * MINUTE)))))
+		{
+			m_nEventZoneBanishFlag = true;
+			m_nEventZoneBanishTime = 180;
+			Announcement(IDS_EVENT_ZONE_VICTO);
+				
+			switch(m_nEventZoneTime)
+			{
+				case 2:
+					{
+						std::string sEventRewardHuman;
+						std::string sEventRewardOrc;
+						SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+						foreach (itr, sessMap)
+						{
+							CUser * pUser = TO_USER(itr->second);
+							if (pUser == nullptr 
+								|| !pUser->isInGame()
+								|| pUser->isGM()
+								|| pUser->GetZoneID() != ZONE_PVP_EVENT)
+								continue;
+								
+							if (pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) == 1)
+							{
+								if (pUser->GetNation() == KARUS)
+									sEventRewardOrc = string_format("%s has been the Karus top 1 of the PvP Event!", pUser->GetName().c_str());
+								else
+									sEventRewardHuman = string_format("%s has been the Human top 1 of the PvP Event!", pUser->GetName().c_str());
+
+								pUser->GiveItem(KNIGHT_MEDAL, 1);
+								pUser->GiveItem(389196000, 1);
+								pUser->GiveItem(GOLD_EAGLE_WINGS, 1, true, 2);
+								pUser->SendLoyaltyChange(200);
+							}
+							else  if (pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) > 1 && pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) <= 3)
+							{
+								pUser->GiveItem(389197000, 1);
+								pUser->GiveItem(900180669, 1, true, 2);
+								pUser->SendLoyaltyChange(100);
+							}
+						}
+						SendNotice(sEventRewardOrc.c_str());
+						SendNotice(sEventRewardHuman.c_str());
+						SendItemZoneUsers(ZONE_PVP_EVENT, GREEN_TREASURE_CHEST);
+					}
+					break;
+				case 3:
+					{
+						std::string sEventRewardHuman;
+						std::string sEventRewardOrc;
+						SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+						foreach (itr, sessMap)
+						{
+							CUser * pUser = TO_USER(itr->second);
+							if (pUser == nullptr 
+								|| !pUser->isInGame()
+								|| pUser->isGM()
+								|| pUser->GetZoneID() != ZONE_RONARK_LAND_BASE)
+								continue;
+								
+							if (pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) == 1)
+							{
+								if (pUser->GetNation() == KARUS)
+									sEventRewardOrc = string_format("%s has been the Karus top 1 of the Devil Square Event!", pUser->GetName().c_str());
+								else
+									sEventRewardHuman = string_format("%s has been the Human top 1 of the Devil Square Event!", pUser->GetName().c_str());
+
+								pUser->GiveItem(KNIGHT_MEDAL, 1);
+								pUser->GiveItem(389196000, 1);
+								pUser->GiveItem(900028683, 1, true, 2);
+								pUser->SendLoyaltyChange(200);
+							}
+							else  if (pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) > 1 && pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) <= 3)
+							{
+								pUser->GiveItem(389197000, 1);
+								pUser->GiveItem(910248763, 1, true, 2);
+								pUser->SendLoyaltyChange(100);
+							}
+						}
+						SendNotice(sEventRewardOrc.c_str());
+						SendNotice(sEventRewardHuman.c_str());
+						SendItemZoneUsers(ZONE_RONARK_LAND_BASE, GREEN_TREASURE_CHEST);
+					}
+					break;
+				case 4:
+					SendItemZoneUsers(ZONE_LOST_TEMPLE, BLUE_TREASURE_CHEST);
+					break;
+				case 5:
+					{
+						std::string sEventRewardHuman;
+						std::string sEventRewardOrc;
+						SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+						foreach (itr, sessMap)
+						{
+							CUser * pUser = TO_USER(itr->second);
+							if (pUser == nullptr 
+								|| !pUser->isInGame()
+								|| pUser->isGM()
+								|| pUser->GetZoneID() != ZONE_ARDREAM)
+								continue;
+								
+							if (pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) == 1)
+							{
+								if (pUser->GetNation() == KARUS)
+									sEventRewardOrc = string_format("%s has been the Karus top 1 of the PvP Event!", pUser->GetName().c_str());
+								else
+									sEventRewardHuman = string_format("%s has been the Human top 1 of the PvP Event!", pUser->GetName().c_str());
+
+								pUser->GiveItem(KNIGHT_MEDAL, 1);
+								pUser->GiveItem(389196000, 1);
+								pUser->GiveItem(GOLD_EAGLE_WINGS, 1, true, 2);
+								pUser->SendLoyaltyChange(200);
+							}
+							else  if (pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) > 1 && pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) <= 3)
+							{
+								pUser->GiveItem(389197000, 1);
+								pUser->GiveItem(900180669, 1, true, 2);
+								pUser->SendLoyaltyChange(100);
+							}
+						}
+						SendNotice(sEventRewardOrc.c_str());
+						SendNotice(sEventRewardHuman.c_str());
+						SendItemZoneUsers(ZONE_ARDREAM, GREEN_TREASURE_CHEST);
+					}
+					break;
+				case 6:
+					SendItemZoneUsers(ZONE_JURAD_MOUNTAIN, BLUE_TREASURE_CHEST);
+					break;
+			}
+		}
+			
+		if (m_nEventZoneBanishFlag)
+		{
+			m_nEventZoneBanishTime++;
+				
+			if (m_nEventZoneBanishTime == 30)
+			{
+				Announcement(IDS_EVENT_ZONE_CLOSE);
+				m_nEventZoneBanishFlag = false;
+				m_nEventZoneBanishTime = 0;
+					
+				m_nEventZoneUsers.clear();
+				m_bEventZoneIsActive = false;
+				m_nEventZoneStartHour = 0;
+				m_nEventZoneLevelMin = 0;
+				m_nEventZoneLevelMax = 0;
+				m_nEventZoneStartTime = 0;
+				m_nEventZoneTime = 0;
+					
+				KickOutZoneUsers(ZONE_DARK_LAND);
+				KickOutZoneUsers(ZONE_LOST_TEMPLE);
+				KickOutZoneUsers(ZONE_JURAD_MOUNTAIN);
+				KickOutZoneUsers(ZONE_RONARK_LAND_BASE);
+				KickOutZoneUsers(ZONE_ARDREAM);
+				KickOutZoneUsers(ZONE_PVP_EVENT);
+			}
+				
+			else if (!m_nEventZoneBanishFlag && !m_bEventZoneIsActive)
+			{
+				KickOutZoneUsers(ZONE_DARK_LAND);
+				KickOutZoneUsers(ZONE_LOST_TEMPLE);
+				KickOutZoneUsers(ZONE_JURAD_MOUNTAIN);
+				KickOutZoneUsers(ZONE_RONARK_LAND_BASE);
+				KickOutZoneUsers(ZONE_ARDREAM);
+				KickOutZoneUsers(ZONE_PVP_EVENT);
+			}
+		}
+	}
+}
+
+void CGameServerDlg::TempleEventTimer()
+{
+	uint32 nHour = g_localTime.tm_hour;
+	uint32 nMinute = g_localTime.tm_min;
+	uint32 nSeconds = g_localTime.tm_sec;
 
 	if (m_nTempleEventRemainSeconds > 0)
 		m_nTempleEventRemainSeconds--;
 
-	if (m_nTempleEventFinishRemainSeconds > 0)
-		m_nTempleEventFinishRemainSeconds -= 6;
-
-	if (m_nTempleEventFinishRemainSeconds == 0 && pTempleEvent.isActive)
+	if (pTempleEvent.ActiveEvent == -1)
 	{
-		pTempleEvent.isActive = false;
-		TempleEventFinish();
-	}
-
-	for(int i = 0; i < BORDER_DEFENSE_WAR_EVENT_COUNT; i++)
-	{
-		if (nHour == m_nBorderDefenseWarTime[i] 
-		&& nMinute == 20 
-			&& pTempleEvent.ActiveEvent != TEMPLE_EVENT_BORDER_DEFENCE_WAR) 
+		for (int i = 0; i < BORDER_DEFENSE_WAR_EVENT_COUNT; i++)
 		{
-			pTempleEvent.ActiveEvent = TEMPLE_EVENT_BORDER_DEFENCE_WAR;
-			pTempleEvent.isActive = false;
-			m_nTempleEventRemainSeconds = 600;
-			TempleEventStart();
-			break;
-		} 
-		else if (nHour == m_nBorderDefenseWarTime[i] 
-		&& nMinute == 30 
-			&& pTempleEvent.ActiveEvent == TEMPLE_EVENT_BORDER_DEFENCE_WAR
-			&& pTempleEvent.isActive)
-		{
-			TempleEventCreateRooms();
-			m_nTempleEventRemainSeconds = 0;
-			TempleEventStart();
-			TempleEventTeleportUsers();
-			break;
-		} 
-	}
-
-	for(int i = 0; i < CHAOS_EVENT_COUNT; i++)
-	{
-		if (nHour == m_nChaosTime[i] 
-		&& nMinute == 0 
-			&& pTempleEvent.ActiveEvent != TEMPLE_EVENT_CHAOS)
-		{
-			pTempleEvent.ActiveEvent = TEMPLE_EVENT_CHAOS;
-			m_nTempleEventRemainSeconds = 600;
-			TempleEventStart();
-			break;
-		}  
-		else if (nHour == m_nChaosTime[i]
-		&& nMinute == 11 
-			&& pTempleEvent.ActiveEvent == TEMPLE_EVENT_CHAOS
-			&& pTempleEvent.isActive) {
-				TempleEventCreateRooms();
-				m_nTempleEventRemainSeconds = 0;
+			if (nHour == m_nBorderDefenseWarTime[i] && nMinute == 0) 
+			{
+				pTempleEvent.ActiveEvent = TEMPLE_EVENT_BORDER_DEFENCE_WAR;
+				pTempleEvent.ZoneID = ZONE_BORDER_DEFENSE_WAR;
+				m_nTempleEventRemainSeconds = 600; // 10 minutes
 				TempleEventStart();
-				TempleEventTeleportUsers();
 				break;
+			} 
+		}
+
+		for (int i = 0; i < CHAOS_EVENT_COUNT; i++)
+		{
+			if (nHour == m_nChaosTime[i] && nMinute == 0)
+			{
+				pTempleEvent.ActiveEvent = TEMPLE_EVENT_CHAOS;
+				pTempleEvent.ZoneID = ZONE_CHAOS_DUNGEON;
+				m_nTempleEventRemainSeconds = 600; // 10 minutes
+				TempleEventStart();
+				break;		
+			}  
+		}
+		
+		for (int i = 0; i < JURAD_MOUNTAIN_EVENT_COUNT; i++)
+		{
+			if (nHour == m_nJuraidTime[i] && nMinute == 0) 
+			{
+				pTempleEvent.ActiveEvent = TEMPLE_EVENT_JURAD_MOUNTAIN;
+				pTempleEvent.ZoneID = ZONE_JURAD_MOUNTAIN;
+				m_nTempleEventRemainSeconds = 600; // 10 minutes
+				JuraidTempleEventStart();
+				break;
+			}  
+		}
+	}
+	else if (pTempleEvent.ActiveEvent != -1)
+	{
+		if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_BORDER_DEFENCE_WAR)
+		{
+			for(int i =0; i<MAX_TEMPLE_EVENT_ROOM ; i++)
+			{
+				if(pTempleEvent.m_sMiniTimerNation[i] == 0)
+					continue;
+
+				if(pTempleEvent.m_sBdwMiniTimer[i]-- != 0 )
+					continue;
+
+				TempleEventFinish(i,pTempleEvent.m_sMiniTimerNation[i]);
+			}
+			for(int i = 0; i < BORDER_DEFENSE_WAR_EVENT_COUNT; i++)
+			{
+				if (nHour == m_nBorderDefenseWarTime[i] && nMinute == 10 && !pTempleEvent.isActive)
+				{
+					m_nTempleEventRemainSeconds = 0; 
+					pTempleEvent.LastEventRoom = 1;
+					pTempleEvent.isActive = true;
+					TempleEventStart();
+					TempleEventTeleportUsers();
+					TempleEventSummon();
+					break;
+				}
+				else if (nHour == m_nBorderDefenseWarTime[i] && nMinute == 11 && !pTempleEvent.isAttackable)   
+				{
+					pTempleEvent.isAttackable = true;
+					break;
+				}
+				else if (nHour == m_nBorderDefenseWarTime[i] && nMinute == 40 && pTempleEvent.isAttackable)   
+				{
+					TerminationFinish();
+					pTempleEvent.isAttackable = false;
+					break;
+				}
+				else if (nHour == m_nBorderDefenseWarTime[i] && nMinute == 40 && nSeconds == 20 && pTempleEvent.isActive) 
+				{
+					TempleEventFinish();
+					break;
+				}
+			}
+		}
+		if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_CHAOS)
+		{
+			for(int i = 0; i < CHAOS_EVENT_COUNT; i++)
+			{
+				if (nHour == m_nChaosTime[i] && nMinute == 10 && nSeconds == 0 && !pTempleEvent.isActive) 
+				{
+						m_nTempleEventRemainSeconds = 0;
+						pTempleEvent.LastEventRoom = 1;
+						pTempleEvent.isActive = true;
+						TempleEventStart(); // Set RemainSeconds to zero
+						TempleEventTeleportUsers();
+						TempleEventSummon();
+						break;
+				}
+				else if (nHour == m_nChaosTime[i] && nMinute == 11 && !pTempleEvent.isAttackable) 
+				{
+						pTempleEvent.isAttackable = true;
+						break;
+				}
+				else if (nHour == m_nChaosTime[i] && nMinute == 30 && pTempleEvent.isAttackable) 
+				{
+						TerminationFinish();
+						pTempleEvent.isAttackable = false;
+						break;
+				}
+				else if (nHour == m_nChaosTime[i] && nMinute == 30 && nSeconds == 20 && pTempleEvent.isActive)
+				{
+						TempleEventFinish();
+						break;
+				}
+			}
+		}
+		if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_JURAD_MOUNTAIN)
+		{
+			for(int i = 0; i < JURAD_MOUNTAIN_EVENT_COUNT; i++)
+			{
+				if (nHour == m_nJuraidTime[i] && nMinute == 10 && !pTempleEvent.isActive)
+				{
+					m_nTempleEventRemainSeconds = 0; 
+					pTempleEvent.LastEventRoom = 1;
+					pTempleEvent.isActive = true;
+					JuraidTempleEventStart(); // Set RemainSeconds to zero
+					TempleEventTeleportUsers();
+					TempleEventSummon();
+					break;
+				}
+				else if (nHour == m_nJuraidTime[i] && nMinute == 11 && !pTempleEvent.isAttackable)   
+				{
+					pTempleEvent.isAttackable = true;
+					break;
+				}
+				else if (nHour == m_nJuraidTime[i] && nMinute == 50 && pTempleEvent.isAttackable)   
+				{
+					TerminationFinish();
+					pTempleEvent.isAttackable = false;
+					break;
+				}
+				else if (nHour == m_nJuraidTime[i] && nMinute == 50 && nSeconds == 20 && pTempleEvent.isActive) 
+				{
+					TempleEventFinish();
+					break;
+				}
+			}
 		}
 	}
 }
@@ -2065,169 +3342,274 @@ void CGameServerDlg::TempleEventStart()
 	pTempleEvent.KarusUserCount = 0;
 	pTempleEvent.ElMoradUserCount = 0;
 	pTempleEvent.AllUserCount = 0;
+	pTempleEvent.isDevaControl = false;
+	pTempleEvent.isDevaFlag = false;
+	memset(pTempleEvent.KarusDeathCount , 0 , sizeof(pTempleEvent.KarusDeathCount));
+	memset(pTempleEvent.ElmoDeathCount , 0 , sizeof(pTempleEvent.ElmoDeathCount));
 	result << (uint16)pTempleEvent.ActiveEvent << m_nTempleEventRemainSeconds;
 	Send_All(&result);
 }
 
-void CGameServerDlg::TempleEventCreateRooms()
+void CGameServerDlg::JuraidTempleEventStart()
 {
-	uint8 nMaxUserCount = 0;
-
-	switch (pTempleEvent.ActiveEvent)
-	{
-	case TEMPLE_EVENT_BORDER_DEFENCE_WAR:
-		nMaxUserCount = 16;
-		break;
-	case TEMPLE_EVENT_CHAOS:
-		nMaxUserCount = 20;
-		break;
-	case TEMPLE_EVENT_JURAD_MOUNTAIN:
-		nMaxUserCount = 16;
-		break;
-	}
-
-	uint8 nCurrentUserCount = 0;
-	uint8 nCurrentEventRoom = 1;
-
-	foreach_stlmap_nolock(itr, g_pMain->m_TempleEventUserArray)
-	{
-		CUser * pUser = GetUserPtr(itr->second->m_socketID);
-
-		if (pUser == nullptr 
-			||	!pUser->isInGame())
-			continue;
-
-		pUser->UpdateEventUser(pUser->GetSocketID(), nCurrentEventRoom);
-		nCurrentUserCount++;
-
-		if (nCurrentUserCount == nMaxUserCount)
-		{
-			nCurrentUserCount = 0;
-			nCurrentEventRoom++;
-		}
-	}
+	pTempleEvent.StartTime = (uint32)UNIXTIME;
+	pTempleEvent.KarusUserCount = 0;
+	pTempleEvent.ElMoradUserCount = 0;	
+	pTempleEvent.AllUserCount = 0;
+	pTempleEvent.isDevaControl = false;
+	pTempleEvent.isDevaFlag = false;
+	memset(pTempleEvent.KarusDeathCount , 0 , sizeof(pTempleEvent.KarusDeathCount));
+	memset(pTempleEvent.ElmoDeathCount , 0 , sizeof(pTempleEvent.ElmoDeathCount));
+	Announcement(IDS_JURAD_EVENT_OPEN);	
 }
 
 void CGameServerDlg::TempleEventTeleportUsers()
 {
-	uint8 ZoneID = 0;
-
 	switch (pTempleEvent.ActiveEvent)
 	{
 	case TEMPLE_EVENT_BORDER_DEFENCE_WAR:
-		ZoneID = ZONE_BORDER_DEFENSE_WAR;
+		pTempleEvent.isAttackable = false;
 		break;
 	case TEMPLE_EVENT_CHAOS:
-		ZoneID = ZONE_CHAOS_DUNGEON;
+		pTempleEvent.isAttackable = false;
 		break;
 	case TEMPLE_EVENT_JURAD_MOUNTAIN:
-		ZoneID = ZONE_JURAD_MOUNTAIN;
+		pTempleEvent.isAttackable = false;
 		break;
 	}
 
-	_START_POSITION *pStartPosition = GetStartPosition(ZoneID);
-
-	if (pStartPosition == nullptr)
-	{
-		TRACE("### TempleEventTeleportUsers - StartPosition not found : Zone ID=%d",ZoneID);
-		return;
-	}
-
-	foreach_stlmap_nolock(itr, m_TempleEventUserArray)
+	foreach_stlmap (itr, m_TempleEventUserArray)
 	{
 		CUser * pUser = GetUserPtr(itr->second->m_socketID);
 
 		if (pUser == nullptr 
-			||	!pUser->isInGame())
-			continue;
+		 || !pUser->isInGame())
+		 continue;
 
-		if (ZoneID == ZONE_CHAOS_DUNGEON)
-			pUser->RobItem(CHAOS_MAP,1);
-
-		if (pUser->GetNation() == KARUS)
+		if (pTempleEvent.ZoneID == ZONE_CHAOS_DUNGEON)
 		{
-			pUser->ZoneChange(ZoneID, 
-				(float)pStartPosition->sKarusZ + myrand(0, pStartPosition->bRangeX), 
-				(float)pStartPosition->sKarusX + myrand(0, pStartPosition->bRangeZ));
+			if (pUser->CheckExistItem(CHAOS_MAP, 1))
+				pUser->RobItem(CHAOS_MAP, 1);
+
+			pUser->ZoneChange(pTempleEvent.ZoneID,0.0f,0.0f); // Start position is random...
+			TerminitionTime(ZONE_CHAOS_DUNGEON,1201);
 		}
-		else
+
+		if (pTempleEvent.ZoneID == ZONE_JURAD_MOUNTAIN)
 		{
-			pUser->ZoneChange(ZoneID, 
-				(float)pStartPosition->sElmoradX + myrand(0, pStartPosition->bRangeX), 
-				(float)pStartPosition->sElmoradZ + myrand(0, pStartPosition->bRangeZ));
+			pUser->ZoneChange(pTempleEvent.ZoneID,0.0f,0.0f);
+			TerminitionTime(ZONE_JURAD_MOUNTAIN, 3001);
+		}
+		
+		if (pTempleEvent.ZoneID == ZONE_BORDER_DEFENSE_WAR)
+		{
+			pUser->ZoneChange(pTempleEvent.ZoneID,0.0f,0.0f);
+			TerminitionTime(ZONE_BORDER_DEFENSE_WAR, 1801);
 		}
 	}
-
-	m_nTempleEventFinishRemainSeconds = 300; // 20 minute is both
-	pTempleEvent.isActive = true;
 }
 
-void CGameServerDlg::TempleEventFinish()
+uint8 CGameServerDlg::TempleEventGetRoomUsers(uint16 nEventRoom) 
 {
-	uint8 ZoneID = 0;
+	uint8 nEventRoomUserCount = 0;
 
-	switch (pTempleEvent.ActiveEvent)
+	foreach_stlmap (itr, m_TempleEventUserArray)
 	{
-	case TEMPLE_EVENT_BORDER_DEFENCE_WAR:
-		ZoneID = ZONE_BORDER_DEFENSE_WAR;
-		SendItemZoneUsers(ZoneID, CERTIFICATE_OF_VICTORY); // winner reward...
-		SendItemZoneUsers(ZoneID, BORDER_SECURITY_SCROLL);  // winner reward...
-		SendItemZoneUsers(ZoneID, RED_TREASURE_CHEST);
-		break;
-	case TEMPLE_EVENT_CHAOS:
-		ZoneID = ZONE_CHAOS_DUNGEON;
-		// Get user rank for reward
-		SendItemZoneUsers(ZoneID, VOUCHER_OF_CHAOS);
-		/*
-		SendItemZoneUsers(ZoneID, VOUCHER_OF_ORACLE);
-		SendItemZoneUsers(ZoneID, BLUE_TREASURE_CHEST);
-		SendItemZoneUsers(ZoneID, GREEN_TREASURE_CHEST);
-		SendItemZoneUsers(ZoneID, RED_TREASURE_CHEST);
-		*/
-		break;
-	case TEMPLE_EVENT_JURAD_MOUNTAIN:
-		ZoneID = ZONE_JURAD_MOUNTAIN;
-		break;
+		if (itr->second->m_bEventRoom == nEventRoom)
+			nEventRoomUserCount++;
 	}
 
-	pTempleEvent.ActiveEvent = -1;
+	return nEventRoomUserCount;
+}
 
-	foreach_stlmap_nolock(itr, m_TempleEventUserArray)
+void CGameServerDlg::TempleEventSummon()
+{
+	if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_CHAOS)
+	{
+		for (int i = 0; i < g_pMain->pTempleEvent.LastEventRoom; i++)
+		{
+			foreach_stlmap_nolock (itr, m_MonsterRespawnListInformationArray)
+			{
+				if (itr->second->ZoneID == ZONE_CHAOS_DUNGEON)
+				{
+					SpawnEventNpc(itr->second->sSid,false,itr->second->ZoneID,itr->second->X,itr->second->Y,itr->second->Z,itr->second->sCount,itr->second->bRadius,60*MINUTE,0,-1,i+1/* EventRoom */);
+					SpawnEventNpc(itr->second->sSid,true,itr->second->ZoneID,itr->second->X,itr->second->Y,itr->second->Z,itr->second->sCount,itr->second->bRadius,60*MINUTE,0,-1,i+1/* EventRoom */);
+				}
+			}
+		}
+	}
+	else if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_BORDER_DEFENCE_WAR)
+	{
+		for (int i = 0; i < g_pMain->pTempleEvent.LastEventRoom; i++)
+		{
+			foreach_stlmap_nolock (itr, m_MonsterRespawnListInformationArray)
+			{
+				if (itr->second->ZoneID == ZONE_BORDER_DEFENSE_WAR)
+				{
+					SpawnEventNpc(itr->second->sSid,false,itr->second->ZoneID,itr->second->X,itr->second->Y,itr->second->Z,itr->second->sCount,itr->second->bRadius,60*MINUTE,0,-1,i+1/* EventRoom */);
+					SpawnEventNpc(itr->second->sSid,true,itr->second->ZoneID,itr->second->X,itr->second->Y,itr->second->Z,itr->second->sCount,itr->second->bRadius,60*MINUTE,0,-1,i+1/* EventRoom */);
+				}
+			}
+		}
+	}
+	else if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_JURAD_MOUNTAIN)
+	{
+		for (int i = 0; i < g_pMain->pTempleEvent.LastEventRoom; i++)
+		{
+			foreach_stlmap_nolock (itr, m_MonsterRespawnListInformationArray)
+			{
+				if (itr->second->ZoneID == ZONE_JURAD_MOUNTAIN)
+				{
+					SpawnEventNpc(itr->second->sSid,false,itr->second->ZoneID,itr->second->X,itr->second->Y,itr->second->Z,itr->second->sCount,itr->second->bRadius,60*MINUTE,0,-1,i+1/* EventRoom */);
+					SpawnEventNpc(itr->second->sSid,true,itr->second->ZoneID,itr->second->X,itr->second->Y,itr->second->Z,itr->second->sCount,itr->second->bRadius,60*MINUTE,0,-1,i+1/* EventRoom */);
+				}
+			}
+		}
+	}
+}
+
+void CGameServerDlg::TempleEventFinish(uint16 m_sEventRoom, uint8 m_bNation)
+{
+	foreach_stlmap (itr, m_TempleEventUserArray)
 	{
 		CUser * pUser = GetUserPtr(itr->second->m_socketID);
 
-		if (pUser == nullptr 
-			||	!pUser->isInGame())
+		if (pUser == nullptr || !pUser->isInGame())
 			continue;
 
-		pUser->UpdateEventUser(pUser->GetSocketID(), -1);
+		_USER_RANKING * pRankInfo = m_UserRankingArray[pUser->GetNation() - 1].GetData(itr->second->m_socketID);
 
-		_USER_RANKING * pRankInfo = m_UserRankingArray->GetData(itr->second->m_socketID);
-
-		if (pRankInfo != nullptr)
+		if (pRankInfo)
 		{
 			int64 nChangeExp = -1;
 
-			if (ZoneID == ZONE_BORDER_DEFENSE_WAR)
+			if (pRankInfo->m_bZone == ZONE_BORDER_DEFENSE_WAR)
+			{
+				if (g_pMain->pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] == pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] && g_pMain->pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] == pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()])
+				{
+					pUser->GiveItem(RED_TREASURE_CHEST,1);
+					pUser->GiveItem(CERTIFICATE_OF_VICTORY,1);
+					pUser->GiveItem(BORDER_SECURITY_SCROLL,1);
+					pUser->SendLoyaltyChange(500);
+				}
+				else if (pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] > pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] && pUser->GetNation() == KARUS) 
+				{
+					pUser->GiveItem(RED_TREASURE_CHEST,1);
+					pUser->GiveItem(CERTIFICATE_OF_VICTORY,1);
+					pUser->GiveItem(BORDER_SECURITY_SCROLL,1);
+					pUser->SendLoyaltyChange(500);
+				}
+				else if (pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] > pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] && pUser->GetNation() == ELMORAD) 
+				{
+					pUser->GiveItem(RED_TREASURE_CHEST,1);
+					pUser->GiveItem(CERTIFICATE_OF_VICTORY,1);
+					pUser->GiveItem(BORDER_SECURITY_SCROLL,1);
+					pUser->SendLoyaltyChange(500);
+				}
+				else
+				{
+					pUser->GiveItem(BORDER_SECURITY_SCROLL,1);
+				}
+
 				if (pUser->GetLevel() < 58)
 					nChangeExp = int64((pUser->GetLevel()-20) * (3000 + 100/* Temp Score */* 1000));
 				else
-					nChangeExp = int64((pUser->GetLevel()+55) * (20000 + 100/* Temp Score */ * 500));				
-			else if (ZoneID == ZONE_CHAOS_DUNGEON)
-				nChangeExp = int64((pUser->GetLevel()^3) * 0.15 * (5 * pRankInfo->m_KillCount - pRankInfo->m_DeathCount));
+					nChangeExp = int64((pUser->GetLevel()+55) * (20000 + 100/* Temp Score */ * 500));		
+			}
+			
+			if (pRankInfo->m_bZone == ZONE_JURAD_MOUNTAIN)
+			{
+				if (g_pMain->pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] == pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] && g_pMain->pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] == pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()])
+				{
+					if (pUser->GetLevel() >= 70 && pUser->GetLevel() <= 72)
+						pUser->GiveItem(GREEN_GEM);
+					else if (pUser->GetLevel() >= 73 && pUser->GetLevel() <= 74)
+						pUser->GiveItem(BLUE_GEM);
+					else if (pUser->GetLevel() >= 75 && pUser->GetLevel() <= 76)
+						pUser->GiveItem(YELLOW_GEM);
+					else if (pUser->GetLevel() >= 77 && pUser->GetLevel() <= 78)
+						pUser->GiveItem(RED_GEM);
+					else if (pUser->GetLevel() >= 79 && pUser->GetLevel() <= 83)
+						pUser->GiveItem(SILVERY_GEM);
+				}
+				else if (pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] > pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] && pUser->GetNation() == KARUS) 
+				{
+					if (pUser->GetLevel() >= 70 && pUser->GetLevel() <= 72)
+						pUser->GiveItem(GREEN_GEM);
+					else if (pUser->GetLevel() >= 73 && pUser->GetLevel() <= 74)
+						pUser->GiveItem(BLUE_GEM);
+					else if (pUser->GetLevel() >= 75 && pUser->GetLevel() <= 76)
+						pUser->GiveItem(YELLOW_GEM);
+					else if (pUser->GetLevel() >= 77 && pUser->GetLevel() <= 78)
+						pUser->GiveItem(RED_GEM);
+					else if (pUser->GetLevel() >= 79 && pUser->GetLevel() <= 83)
+						pUser->GiveItem(SILVERY_GEM);
+				}
+				else if (pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] > pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] && pUser->GetNation() == ELMORAD)	
+				{
+					if (pUser->GetLevel() >= 70 && pUser->GetLevel() <= 72 )
+						pUser->GiveItem(GREEN_GEM);
+					else if (pUser->GetLevel() >= 73 && pUser->GetLevel() <= 74 )
+						pUser->GiveItem(BLUE_GEM);
+					else if (pUser->GetLevel() >= 75 && pUser->GetLevel() <= 76 )
+						pUser->GiveItem(YELLOW_GEM);
+					else if (pUser->GetLevel() >= 77 && pUser->GetLevel() <= 78 )
+						pUser->GiveItem(RED_GEM);
+					else if (pUser->GetLevel() >= 79 && pUser->GetLevel() <= 83 )
+						pUser->GiveItem(SILVERY_GEM);
+				}
+				else
+				{
+						pUser->GiveItem(BLACK_GEM);
+				}
+			}
+
+			else if (pRankInfo->m_bZone == ZONE_CHAOS_DUNGEON)
+			{
+				int64 nGainedExp = int64(pow(pUser->GetLevel(),3) * 0.15 * (5 * pRankInfo->m_KillCount - pRankInfo->m_DeathCount));
+				int64 nPremiumGainedExp = nGainedExp * 2;
+
+				if (nGainedExp > 8000000)
+					nGainedExp = 8000000;
+
+				if (nPremiumGainedExp > 8000000)
+					nPremiumGainedExp = 8000000;
+
+				nChangeExp = pUser->m_bPremiumType != 0 ? nPremiumGainedExp : nGainedExp;
+
+				uint8 nEventRoomUserCount = g_pMain->TempleEventGetRoomUsers(pUser->GetEventRoom());
+				uint8 nItemRewardRankFirst = nEventRoomUserCount / 3;
+				uint8 nItemRewardRankSecond = (nEventRoomUserCount  - 1) * 2;
+
+				int32 nUserRank = pUser->GetPlayerRank(RANK_TYPE_CHAOS_DUNGEON);
+
+				if (nUserRank > 0 && nUserRank < nItemRewardRankFirst)
+					pUser->GiveItem(BLUE_TREASURE_CHEST);
+				else if (nUserRank > 0 && nUserRank >= nItemRewardRankFirst && nUserRank <= nItemRewardRankSecond)
+					pUser->GiveItem(GREEN_TREASURE_CHEST);
+				else if (nUserRank > 0 && nUserRank > nItemRewardRankSecond)
+					pUser->GiveItem(RED_TREASURE_CHEST);
+			}
 
 			if (nChangeExp > 0)
 				pUser->ExpChange(nChangeExp);
-
-			m_UserRankingArray->DeleteData(itr->second->m_socketID);
 		}
-
-		TempleEventKickOutUser(pUser);
 	}
 
-	m_TempleEventUserArray.DeleteAllData();
-}
+	foreach_stlmap_nolock (itr, m_TempleEventUserArray)
+	{
+		CUser * pUser = GetUserPtr(itr->second->m_socketID);
 
+		if (pUser && pUser->isInGame())
+		{
+			TempleEventKickOutUser(pUser);
+			pUser->m_bEventRoom = 0;
+		}
+			
+	}
+
+	TempleEventReset();
+}
 void CGameServerDlg::TempleEventGetActiveEventTime(CUser *pUser)
 {
 	if (pUser == nullptr)
@@ -2240,11 +3622,25 @@ void CGameServerDlg::TempleEventGetActiveEventTime(CUser *pUser)
 
 void CGameServerDlg::TempleEventSendActiveEventTime(CUser *pUser)
 {
+	if (pUser == nullptr)
+		return;
+
+	if (!pUser->isEventUser())
+	{
+		TempleEventGetActiveEventTime(pUser);
+		return;
+	}
+
+	Packet result(WIZ_EVENT, uint8(TEMPLE_EVENT_JOIN));
+	result << uint8(1) << uint16(pTempleEvent.ActiveEvent);
+	pUser->Send(&result);
+	pUser->TempleOperations(TEMPLE_EVENT_COUNTER);
 }
 
 void CGameServerDlg::TempleEventKickOutUser(CUser *pUser)
 {
-	if (pUser == nullptr || !pUser->isInGame())
+	if (pUser == nullptr
+		|| !pUser->isInGame())
 		return;
 
 	uint8 nZoneID = 0;
@@ -2255,9 +3651,9 @@ void CGameServerDlg::TempleEventKickOutUser(CUser *pUser)
 	{
 		if (pUser->GetLevel() <  35)
 			nZoneID = ZONE_MORADON;
-		else if (pUser->GetLevel() >=  35 && pUser->GetLevel() <=59)
+		else if (pUser->GetLevel() >= 35 && pUser->GetLevel() <=59)
 			nZoneID = ZONE_ARDREAM;
-		else if (pUser->GetLevel() >=  60 && pUser->GetLevel() <=69)
+		else if (pUser->GetLevel() >= 60 && pUser->GetLevel() <=69)
 			nZoneID = ZONE_RONARK_LAND_BASE;
 		else if (pUser->GetLevel() >=  70)
 			nZoneID = ZONE_RONARK_LAND;
@@ -2276,31 +3672,58 @@ void CGameServerDlg::TempleEventKickOutUser(CUser *pUser)
 		return;
 	}
 
-	if (pUser->GetNation() == KARUS)
-	{
-		pUser->ZoneChange(nZoneID, 
-			(float)pStartPosition->sKarusZ + myrand(0, pStartPosition->bRangeX), 
-			(float)pStartPosition->sKarusX + myrand(0, pStartPosition->bRangeZ));
-	}
-	else
-	{
-		pUser->ZoneChange(nZoneID, 
-			(float)pStartPosition->sElmoradX + myrand(0, pStartPosition->bRangeX), 
-			(float)pStartPosition->sElmoradZ + myrand(0, pStartPosition->bRangeZ));
-	}
+	pUser->ZoneChange(nZoneID, 0.0f,0.0f);
+}
+
+void CGameServerDlg::TempleEventReset()
+{
+	pTempleEvent.ActiveEvent = -1;
+	pTempleEvent.ZoneID = 0;
+	pTempleEvent.LastEventRoom = 1;
+	pTempleEvent.StartTime = 0;
+	pTempleEvent.AllUserCount = 0;
+	pTempleEvent.KarusUserCount = 0;
+	pTempleEvent.ElMoradUserCount = 0;
+	pTempleEvent.isAttackable = false;
+	pTempleEvent.isActive = false;
+	pTempleEvent.isDevaControl = false;
+	pTempleEvent.isDevaFlag = false;
+	memset(pTempleEvent.KarusDeathCount , 0 , sizeof(pTempleEvent.KarusDeathCount));
+	memset(pTempleEvent.ElmoDeathCount , 0 , sizeof(pTempleEvent.ElmoDeathCount));
+	memset(pTempleEvent.m_sBdwMiniTimer , -1 , sizeof(pTempleEvent.m_sBdwMiniTimer));
+	memset(pTempleEvent.m_sMiniTimerNation , -1 , sizeof(pTempleEvent.m_sMiniTimerNation));
+	m_sKarusBdw = 0;
+	m_sElmoBdw = 0;
+
+	LeechKig = 0;
+	Apostle = 0;
+	Kocatris = 0;
+	TrollWarrior = 0;
+	Minotaur = 0;
+	DoomSoldier = 0;
+ 
+
+	e_Lirumu = 0;
+	e_Apostle = 0;
+	e_BoneDragon = 0;
+	e_TrollWarrior = 0;
+	e_RedDragon = 0;
+	e_DoomSoldier = 0;
+
+	m_TempleEventUserArray.DeleteAllData();
 }
 
 void CGameServerDlg::Announcement(uint16 type, int nation, int chat_type, CUser* pExceptUser, CNpc *pExpectNpc)
 {
 	string chatstr; 
+	uint8 ZoneID = 0;
+	std::string sEventName;
 
 	switch (type)
 	{
 	case BATTLEZONE_OPEN:
-	case SNOW_BATTLEZONE_OPEN:
 		GetServerResource(IDP_BATTLEZONE_OPEN, &chatstr);
 		break;
-
 	case DECLARE_WINNER:
 		if (m_bVictory == KARUS)
 			GetServerResource(IDP_KARUS_VICTORY, &chatstr, m_sElmoradDead, m_sKarusDead);
@@ -2323,6 +3746,12 @@ void CGameServerDlg::Announcement(uint16 type, int nation, int chat_type, CUser*
 		else
 			GetServerResource(IDS_BANISH_USER, &chatstr);
 		break;
+	case SNOW_BAN:
+		if (m_bVictory == KARUS || m_bVictory == ELMORAD)
+			GetServerResource(IDS_BANISH_LOSER, &chatstr);
+		else
+			GetServerResource(IDS_SNOWBATTLE_BANISH_USER, &chatstr);
+		break;
 	case DECLARE_BATTLE_ZONE_STATUS:
 		if (m_byBattleZone + ZONE_BATTLE_BASE == ZONE_BATTLE4)
 		{
@@ -2336,9 +3765,9 @@ void CGameServerDlg::Announcement(uint16 type, int nation, int chat_type, CUser*
 		if (pExceptUser)
 		{
 			GetServerResource(IDS_BATTLE_MONUMENT_WON_MESSAGE, &chatstr, GetBattleAndNationMonumentName(chat_type).c_str());
-			g_pMain->SendNotice<PUBLIC_CHAT>(chatstr.c_str(),pExceptUser->GetZoneID(),pExceptUser->GetNation());
+			g_pMain->SendNotice<PUBLIC_CHAT>(chatstr.c_str(),pExceptUser->GetZoneID());
 			GetServerResource(IDS_BATTLE_MONUMENT_LOST_MESSAGE, &chatstr, GetBattleAndNationMonumentName(chat_type).c_str());
-			g_pMain->SendNotice<PUBLIC_CHAT>(chatstr.c_str(),pExceptUser->GetZoneID(),pExceptUser->GetNation() == KARUS ? ELMORAD : KARUS);
+			g_pMain->SendNotice<PUBLIC_CHAT>(chatstr.c_str(),pExceptUser->GetZoneID());
 			return;
 		}
 		break;
@@ -2347,10 +3776,18 @@ void CGameServerDlg::Announcement(uint16 type, int nation, int chat_type, CUser*
 		{
 			uint16 nTrapNumber = pExceptUser->GetZoneID() == ZONE_KARUS ?  chat_type - LUFERSON_MONUMENT_SID : chat_type - ELMORAD_MONUMENT_SID;
 
-			GetServerResource(IDS_INFILTRATION_CONQUER, &chatstr, GetBattleAndNationMonumentName(nTrapNumber, pExceptUser->GetZoneID()).c_str());
-			g_pMain->SendAnnouncement(chatstr.c_str(), pExceptUser->GetNation());
-			GetServerResource(IDS_INFILTRATION_RECAPTURE, &chatstr, GetBattleAndNationMonumentName(nTrapNumber, pExceptUser->GetZoneID()).c_str());
-			g_pMain->SendAnnouncement(chatstr.c_str(), pExceptUser->GetNation() == KARUS ? ELMORAD : KARUS);
+			if ((pExceptUser->GetNation() == KARUS && pExceptUser->GetZoneID() == ELMORAD) || (pExceptUser->GetNation() == ELMORAD && pExceptUser->GetZoneID() == KARUS))
+			{
+				GetServerResource(IDS_INFILTRATION_CONQUER, &chatstr, GetBattleAndNationMonumentName(nTrapNumber, pExceptUser->GetZoneID()).c_str());
+				g_pMain->SendAnnouncement(chatstr.c_str());
+				return;
+			}
+			else if ((pExceptUser->GetNation() == KARUS && pExceptUser->GetZoneID() == KARUS) || (pExceptUser->GetNation() == ELMORAD && pExceptUser->GetZoneID() == ELMORAD))
+			{
+				GetServerResource(IDS_INFILTRATION_RECAPTURE, &chatstr, GetBattleAndNationMonumentName(nTrapNumber, pExceptUser->GetZoneID()).c_str());
+				g_pMain->SendAnnouncement(chatstr.c_str());
+				return;
+			}
 			return;
 		}
 		break;
@@ -2364,6 +3801,9 @@ void CGameServerDlg::Announcement(uint16 type, int nation, int chat_type, CUser*
 			return;
 		}
 		break;
+	case SNOW_BATTLEZONE_OPEN:
+		GetServerResource(IDS_SNOWBATTLE_OPEN, &chatstr);
+		break;
 	case UNDER_ATTACK_NOTIFY:
 		if (m_bVictory == KARUS)
 			GetServerResource(IDS_UNDER_ATTACK_ELMORAD, &chatstr, m_sKarusDead, m_sElmoradDead);
@@ -2374,6 +3814,9 @@ void CGameServerDlg::Announcement(uint16 type, int nation, int chat_type, CUser*
 		break;
 	case BATTLEZONE_CLOSE:
 		GetServerResource(IDS_BATTLE_CLOSE, &chatstr);
+		break;
+	case SNOW_BATTLEZONE_CLOSE:
+		GetServerResource(IDS_SNOWBATTLE_CLOSE, &chatstr);
 		break;
 	case KARUS_CAPTAIN_NOTIFY:
 		GetServerResource(IDS_KARUS_CAPTAIN, &chatstr, m_strKarusCaptain.c_str());
@@ -2395,15 +3838,169 @@ void CGameServerDlg::Announcement(uint16 type, int nation, int chat_type, CUser*
 			GetServerResource(IDS_ELMO_CAPTAIN_DEPRIVE, &chatstr, pKnights == nullptr ? "***" : pKnights->GetName().c_str(),  pExceptUser->GetName().c_str());
 		}
 		break;
+	case IDS_MONSTER_CHALLENGE_ANNOUNCEMENT:
+		GetServerResource(IDS_MONSTER_CHALLENGE_ANNOUNCEMENT, &chatstr, m_nForgettenTempleStartHour);
+		break;
+	case IDS_MONSTER_CHALLENGE_OPEN:
+		GetServerResource(IDS_MONSTER_CHALLENGE_OPEN, &chatstr);
+		break;
+	case IDS_MONSTER_CHALLENGE_START:
+		ZoneID = ZONE_FORGOTTEN_TEMPLE;
+		GetServerResource(IDS_MONSTER_CHALLENGE_START, &chatstr);
+		break;
+	case IDS_MONSTER_CHALLENGE_VICTORY:
+		ZoneID = ZONE_FORGOTTEN_TEMPLE;
+		GetServerResource(IDS_MONSTER_CHALLENGE_VICTORY, &chatstr);
+		break;
+	case IDS_MONSTER_CHALLENGE_CLOSE:
+		GetServerResource(IDS_MONSTER_CHALLENGE_CLOSE, &chatstr);
+		break;
+	case IDS_EVENT_ZONE_OPEN:
+		if (m_nEventZoneTime == 1)
+			sEventName = "Dark Land";
+		else if (m_nEventZoneTime == 2)
+			sEventName = "Mini PVP Zone";
+		else if (m_nEventZoneTime == 3)
+			sEventName = "Devils Square";
+		else if (m_nEventZoneTime == 4)
+			sEventName = "Lost Castle";
+		else if (m_nEventZoneTime == 6)
+		{
+			GetServerResource(IDS_JURAD_EVENT_OPEN, &chatstr, sEventName.c_str());
+			break;
+		}
+		else if (m_nEventZoneTime == 5)
+		{
+			sEventName = "PVP Zone";
+			GetServerResource(IDS_PVP_EVENT_ZONE_OPEN, &chatstr, sEventName.c_str());
+			break;
+		}
+
+		GetServerResource(IDS_EVENT_ZONE_OPEN, &chatstr, sEventName.c_str());
+		break;
+	case IDS_EVENT_ZONE_START:
+		if (m_nEventZoneTime == 1)
+		{
+			ZoneID = ZONE_DARK_LAND;
+			sEventName = "Dark Land is infested of Demons. Rescue the city and fight for the Bosses!";
+			GetServerResource(IDS_EVENT_ZONE_START, &chatstr, sEventName.c_str());
+		}
+		else if (m_nEventZoneTime == 5)
+		{
+			ZoneID = ZONE_ARDREAM;
+			sEventName = "The first 3-ranked players(More NPs Gained) will receive award at the end. Go get the Monument and fight for the bosses!";
+			GetServerResource(IDS_EVENT_ZONE_START, &chatstr, sEventName.c_str());
+		}
+		else if (m_nEventZoneTime == 2)
+		{
+			std::string sNotRank;
+			ZoneID = ZONE_PVP_EVENT;
+			sEventName = "The first 3-ranked players(More NPs Gained) will receive award at the end. Go get the Monument and fight for the bosses!";
+			sNotRank = "You can't see the rank on Mini PvP event but it is working!";
+			SendNotice(sNotRank.c_str());
+			GetServerResource(IDS_EVENT_ZONE_START, &chatstr, sEventName.c_str());
+		}
+		else if (m_nEventZoneTime == 3)
+		{
+			ZoneID = ZONE_RONARK_LAND_BASE;
+			sEventName = "The first 3-ranked players(More NPs Gained) will receive award at the end. Go get the Monument and fight for the bosses!";
+			GetServerResource(IDS_EVENT_ZONE_START, &chatstr, sEventName.c_str());
+		}
+		else if (m_nEventZoneTime == 4)
+		{
+			ZoneID = ZONE_LOST_TEMPLE;
+			sEventName = "Lost Castle is a chaos domined by Rey Satanas. Kill him to get the award!";
+			GetServerResource(IDS_EVENT_ZONE_START, &chatstr, sEventName.c_str());
+		}
+		else if (m_nEventZoneTime == 6)
+		{
+			ZoneID = ZONE_JURAD_MOUNTAIN;
+			sEventName = "Get the keys to go to the end. And then kill Lucifer to get the award!";
+			GetServerResource(IDS_EVENT_ZONE_START, &chatstr, sEventName.c_str());
+		}
+		break;
+	case IDS_EVENT_ZONE_VICTO:
+		if (m_nEventZoneTime == 1)
+			sEventName = "Dark Land";
+		else if (m_nEventZoneTime == 2)
+			sEventName = "Mini PVP Zone";
+		else if (m_nEventZoneTime == 3)
+			sEventName = "Devils Square";
+		else if (m_nEventZoneTime == 4)
+			sEventName = "Lost Castle";
+		else if (m_nEventZoneTime == 5)
+			sEventName = "PVP Zone";
+		else if (m_nEventZoneTime == 6)
+			sEventName = "Jurad Mountain";
+
+			GetServerResource(IDS_EVENT_ZONE_VICTO, &chatstr, sEventName.c_str());
+		break;
+	case IDS_EVENT_ZONE_CLOSE:
+		if (m_nEventZoneTime == 1)
+			sEventName = "Dark Land";
+		else if (m_nEventZoneTime == 2)
+			sEventName = "Mini PVP Zone";
+		else if (m_nEventZoneTime == 3)
+			sEventName = "Devils Square";
+		else if (m_nEventZoneTime == 4)
+			sEventName = "Lost Castle";
+		else if (m_nEventZoneTime == 5)
+			sEventName = "PVP Zone";
+		else if (m_nEventZoneTime == 6)
+			sEventName = "Jurad Mountain";
+
+		GetServerResource(IDS_EVENT_ZONE_CLOSE, &chatstr, sEventName.c_str());
+		break;
+	case IDS_SIEGE_WAR_TIME_NOTICE:
+		GetServerResource(IDS_SIEGE_WAR_TIME_NOTICE, &chatstr, m_SiegeWarNoticeTime);
+		break;	
+	case IDS_SIEGE_WAR_START:
+		GetServerResource(IDS_SIEGE_WAR_START, &chatstr);
+		break;		
+	case IDS_SIEGE_WAR_END:
+		GetServerResource(IDS_SIEGE_WAR_END, &chatstr);
+		break;		
+	case IDS_NPC_GUIDON_DESTORY:
+		GetServerResource(IDS_NPC_GUIDON_DESTORY, &chatstr, m_SiegeWarWinKnightsNotice.c_str());
+		break;		
+	case IDS_SIEGE_WAR_VICTORY:
+		GetServerResource(IDS_SIEGE_WAR_VICTORY, &chatstr, m_SiegeWarWinKnightsNotice.c_str());
+		break;	
+	case IDS_JURAD_EVENT_OPEN:
+		GetServerResource(IDS_JURAD_EVENT_OPEN, &chatstr);
+		break;
 	}
 
 	Packet result;
 	string finalstr;
 	GetServerResource(IDP_ANNOUNCEMENT, &finalstr, chatstr.c_str());
 	ChatPacket::Construct(&result, (uint8) chat_type, &finalstr);
-	Send_All(&result, nullptr, nation);
+	Send_All(&result, nullptr, nation, ZoneID);
 }
 
+void CGameServerDlg::SnowBattleZoneCurrentUsers()
+{
+	C3DMap* pMap = GetZoneByID(ZONE_SNOW_BATTLE);
+	if (pMap == nullptr || m_nServerNo != pMap->m_nServerNo)
+		return;
+
+	uint16 nKarusMan = 0, nElmoradMan = 0;
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	foreach (itr, sessMap)
+	{
+		CUser * pUser = TO_USER(itr->second);
+		if (!pUser->isInGame() || pUser->GetZoneID() != pMap->GetID())
+			continue;
+
+		if (pUser->GetNation() == KARUS)
+			nKarusMan++;
+		else
+			nElmoradMan++;
+	}
+
+	m_sKarusCount = nKarusMan;
+	m_sElmoradCount = nElmoradMan;
+}
 /**
 * @brief	Loads the specified user's NP ranks
 * 			from the rankings tables.
@@ -2413,7 +4010,7 @@ void CGameServerDlg::Announcement(uint16 type, int nation, int chat_type, CUser*
 void CGameServerDlg::GetUserRank(CUser *pUser)
 {
 	// Acquire the lock for thread safety
-	FastGuard lock(m_userRankingsLock);
+	Guard lock(m_userRankingsLock);
 
 	// Get character's name & convert it to upper case for case insensitivity
 	string strUserID = pUser->GetName();
@@ -2435,6 +4032,25 @@ uint16 CGameServerDlg::GetKnightsAllMembers(uint16 sClanID, Packet & result, uin
 		return 0;
 
 	uint16 count = 0;
+		foreach_array (i, pKnights->m_arKnightsUser)
+	{
+		_KNIGHTS_USER *p = &pKnights->m_arKnightsUser[i];
+		if (!p->byUsed)
+			continue;
+		
+		CUser* pCurrent = g_pMain->GetUserPtr(p->strUserName, TYPE_CHARACTER);
+
+		if( pCurrent == nullptr )
+		{
+			if(p->m_bLevel == 0 || p->m_sFame == 0 || p->m_sClass == 0)
+				g_DBAgent.GetClanUserData(sClanID,p);
+
+			result << p->strUserName << uint16(p->m_sFame) << p->m_bLevel << p->m_sClass << uint8(g_pMain->GetUserPtr(p->strUserName, TYPE_CHARACTER) == nullptr ? 0 : 1) << p->strUserMemo << uint32(UNIXTIME - p->m_lastLogin);
+		}
+		else
+			result << pCurrent->GetName() << uint16(pCurrent->GetFame()) << pCurrent->GetLevel() << pCurrent->m_sClass << uint8(g_pMain->GetUserPtr(p->strUserName, TYPE_CHARACTER) == nullptr ? 0 : 1) << pCurrent->m_strMemo << uint32(UNIXTIME - p->m_lastLogin);
+		
+	/*
 	foreach_array (i, pKnights->m_arKnightsUser)
 	{
 		_KNIGHTS_USER *p = &pKnights->m_arKnightsUser[i];
@@ -2446,7 +4062,7 @@ uint16 CGameServerDlg::GetKnightsAllMembers(uint16 sClanID, Packet & result, uin
 			result << pUser->GetName() << pUser->GetFame() << pUser->GetLevel() << pUser->m_sClass << uint8(1);
 		else // normally just clan leaders see this, but we can be generous now.
 			result << pKnights->m_arKnightsUser[i].strUserName << uint8(0) << uint8(0) << uint16(0) << uint8(0);
-
+			*/
 		count++;
 	}
 
@@ -2465,15 +4081,15 @@ uint16 CGameServerDlg::GetKnightsAllMembers(uint16 sClanID, Packet & result, uin
 */
 int CGameServerDlg::GetKnightsGrade(uint32 nPoints)
 {
-	uint32 nClanPoints = nPoints / MAX_CLAN_USERS;
+	uint32 nClanPoints = nPoints;
 
-	if (nClanPoints >= 20000)
+	if (nClanPoints >= m_Grade1)
 		return 1;
-	else if (nClanPoints >= 10000)
+	else if (nClanPoints >= m_Grade2)
 		return 2;
-	else if (nClanPoints >= 5000)
+	else if (nClanPoints >= m_Grade3)
 		return 3;
-	else if (nClanPoints >= 2000)
+	else if (nClanPoints >= m_Grade4)
 		return 4;
 
 	return 5;
@@ -2488,16 +4104,20 @@ int CGameServerDlg::KickOutAllUsers()
 {
 	int count = 0;
 
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser *pUser = TO_USER(itr->second);
 		if (pUser->isInGame())
 			count++;
 
+		pUser->ReqSaveCharacter();
+		pUser->UserDataSaveToAgent();
+		g_DBAgent.UpdateUser(pUser->GetName(), UPDATE_LOGOUT, pUser);
+		g_DBAgent.UpdateWarehouseData(pUser->GetAccountName(), UPDATE_LOGOUT, pUser);
+		g_DBAgent.UpdateSavedMagic(pUser);
 		pUser->Disconnect();
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 	return count;
 }
 
@@ -2506,7 +4126,7 @@ int CGameServerDlg::KickOutAllUsers()
 */
 uint64 CGameServerDlg::GenerateItemSerial()
 {
-	static FastMutex _mutex;
+	static std::recursive_mutex _mutex;
 
 	MYINT64 serial;
 	MYSHORT	increase;
@@ -2516,7 +4136,7 @@ uint64 CGameServerDlg::GenerateItemSerial()
 	struct tm * ptm;
 	ptm = gmtime(&t);
 
-	FastGuard lock(_mutex);
+	Guard lock(_mutex);
 	increase.w = g_increase_serial++;
 
 	serial.b[7] = (uint8)(m_nServerNo);
@@ -2537,10 +4157,10 @@ uint64 CGameServerDlg::GenerateItemSerial()
 *
 * @param	zone	The zone to kick users out from.
 */
-void CGameServerDlg::KickOutZoneUsers(uint8 ZoneID, uint8 TargetZoneID)
+void CGameServerDlg::KickOutZoneUsers(uint8 ZoneID, uint8 TargetZoneID, uint8 bNation)
 {
 	// TODO: Make this localised to zones.
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	C3DMap	*pKarusMap		= GetZoneByID(KARUS),
 		*pElMoradMap	= GetZoneByID(ELMORAD);	
 
@@ -2554,28 +4174,27 @@ void CGameServerDlg::KickOutZoneUsers(uint8 ZoneID, uint8 TargetZoneID)
 			|| pUser->GetZoneID() != ZoneID) 
 			continue;
 
-		if (TargetZoneID > 0)
+		if (TargetZoneID > 0 && bNation == pUser->GetNation())
 		{
-			short x, y;
-
-			if (pUser->GetStartPosition(x,y))
-			{
-				pUser->ZoneChange(TargetZoneID,x,y);
-				continue;
-			}
+			pUser->ZoneChange(TargetZoneID, 0.0f,0.0f);
+			continue;
+		}
+		else if (TargetZoneID > 0 && bNation == ALL)
+		{
+			pUser->ZoneChange(TargetZoneID, 0.0f,0.0f);
+			continue;
 		}
 
 		C3DMap * pMap = (pUser->GetNation() == KARUS ? pKarusMap : pElMoradMap);
-		pUser->ZoneChange(pMap->m_nZoneNumber, pMap->m_fInitX, pMap->m_fInitZ);
+		if(TargetZoneID == 0)
+			pUser->ZoneChange(pMap->m_nZoneNumber, pMap->m_fInitX, pMap->m_fInitZ);
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 }
 
-void CGameServerDlg::SendItemZoneUsers(uint8 ZoneID, uint32 nItemID, uint16 sCount)
+void CGameServerDlg::SendItemZoneUsers(uint8 ZoneID, uint32 nItemID, uint16 sCount /*= 1*/, uint32 Time/*= 0*/)
 {
-	// TODO: Make this localised to zones.
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
-
+	// TO-DO: Make this localised to zones.
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser * pUser = TO_USER(itr->second);
@@ -2583,21 +4202,33 @@ void CGameServerDlg::SendItemZoneUsers(uint8 ZoneID, uint32 nItemID, uint16 sCou
 			|| pUser->GetZoneID() != ZoneID) 
 			continue;
 
-		pUser->RobItem(nItemID, sCount);
+		pUser->GiveItem(nItemID, sCount, true, Time);
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
+}
+
+void CGameServerDlg::SendItemEventRoom(uint16 nEventRoom,uint32 nItemID, uint16 sCount /*= 1*/)
+{
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	foreach (itr, sessMap)
+	{
+		CUser * pUser = TO_USER(itr->second);
+		if (!pUser->isInGame()
+			|| pUser->GetEventRoom() != nEventRoom) 
+			continue;
+		
+		pUser->GiveItem(nItemID, sCount);
+	}
 }
 
 void CGameServerDlg::Send_CommandChat(Packet *pkt, int nation, CUser* pExceptUser)
 {
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser * pUser = TO_USER(itr->second);
 		if (pUser->isInGame() && (nation == 0 || nation == pUser->GetNation()))
 			pUser->Send(pkt);
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 }
 
 void CGameServerDlg::GetCaptainUserPtr()
@@ -2623,7 +4254,7 @@ void CGameServerDlg::BattleZoneCurrentUsers()
 		return;
 
 	uint16 nKarusMan = 0, nElmoradMan = 0;
-	SessionMap & sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
 	foreach (itr, sessMap)
 	{
 		CUser * pUser = TO_USER(itr->second);
@@ -2635,7 +4266,6 @@ void CGameServerDlg::BattleZoneCurrentUsers()
 		else
 			nElmoradMan++;
 	}
-	g_pMain->m_socketMgr.ReleaseLock();
 
 	m_sKarusCount = nKarusMan;
 	m_sElmoradCount = nElmoradMan;
@@ -2660,9 +4290,6 @@ CGameServerDlg::~CGameServerDlg()
 	}
 	printf(" exited.\n");
 
-	printf("Suspending server...\n");
-	m_socketMgr.SuspendServer();
-
 	// Cleanup our script pool & consequently ensure all scripts 
 	// finish execution before proceeding.
 	// This prevents us from freeing data that's in use.
@@ -2684,12 +4311,30 @@ CGameServerDlg::~CGameServerDlg()
 
 	CleanupUserRankings();
 	m_LevelUpArray.clear();
+
+	if (m_fpDeathUser != nullptr)
+		fclose(m_fpDeathUser);
+	
+	if (m_fpDeathNpc != nullptr)
+		fclose(m_fpDeathNpc);
+	
+	if (m_fpChat != nullptr)
+		fclose(m_fpChat);
+
+	if (m_fpGM != nullptr)
+		fclose(m_fpGM);
+
+	if (m_upgradelog != nullptr)
+		fclose(m_upgradelog);
+
+	if (m_fpCheat != nullptr)
+		fclose(m_fpCheat);
 }
 
 std::string CGameServerDlg::GetBattleAndNationMonumentName(int16 TrapNumber, uint8 ZoneID)
 {
-	std::string sMonumentName = ZoneID == 0 ? "DECLARE_BATTLE_MONUMENT_STATUS" : "DECLARE_NATION_MONUMENT_STATUS";
-
+	std::string sMonumentName = ZoneID == 0 ? "Nereid Monument" : "DECLARE_NATION_MONUMENT_STATUS";
+	
 	if (ZoneID == 0)
 	{
 		if (TrapNumber == 1)
@@ -2723,15 +4368,80 @@ std::string CGameServerDlg::GetBattleAndNationMonumentName(int16 TrapNumber, uin
 		else if (TrapNumber == 3)
 			sMonumentName = string_format("%s Monument", ZoneID == ZONE_KARUS ? "Laon Camp" : "Dodo Camp");
 	}
-
+	
 	return sMonumentName;
 }
+bool CGameServerDlg::CastleSiegeWarAttack(CUser *pUser, CUser *pTargetUser)
+{
+	enum
+	{CHALLENGE_CLAN_ERROR = 13};
 
+	Packet result(WIZ_CHALLENGE, uint8(CHALLENGE_CLAN_ERROR));
+
+	pUser->m_sChallengeUser = -1;
+	pUser->m_bChallengeRequested = 0;
+
+	if (pUser == nullptr)
+	{
+		pUser->Send(&result);
+		return false;
+	}
+
+	pUser->m_sChallengeUser = -1;
+	pUser->m_bRequestingChallenge = 0;
+
+	CKnights *pClan1 = g_pMain->GetClanPtr(pUser->GetClanID());
+	CKnights *pClan2 = g_pMain->GetClanPtr(pTargetUser->GetClanID());
+
+	if (pClan1 == nullptr || pClan2 == nullptr)
+	{
+		pTargetUser->Send(&result);
+		pUser->Send(&result);
+		return false;
+	}
+
+	foreach_array (i, pClan1->m_arKnightsUser)
+	{
+		_KNIGHTS_USER *p = &pClan1->m_arKnightsUser[i];
+		if (!p->byUsed || p->pSession == nullptr)
+			continue;
+
+		CUser *pClanMember = p->pSession;
+		if (pClanMember->GetZoneID() == pUser->GetZoneID()
+			&& !pClanMember->isStoreOpen()
+			&& !pClanMember->isMerchanting()
+			&& !pClanMember->isTrading()
+			&& !pClanMember->isInParty()
+			&& !pClanMember->m_bRequestingChallenge
+			&& pClanMember->m_sChallengeUser < 0
+			&& !CKnightsManager::CheckAlliance(pClan1 , pClan2))
+			return true;
+	}
+
+	foreach_array (i, pClan2->m_arKnightsUser)
+	{
+		_KNIGHTS_USER *p = &pClan2->m_arKnightsUser[i];
+		if (!p->byUsed || p->pSession == nullptr)
+			continue;
+
+		CUser *pClanMember = p->pSession;
+		if (pClanMember->GetZoneID() == pTargetUser->GetZoneID()
+			&& !pClanMember->isStoreOpen()
+			&& !pClanMember->isMerchanting()
+			&& !pClanMember->isTrading()
+			&& !pClanMember->isInParty()
+			&& !pClanMember->m_bRequestingChallenge
+			&& pClanMember->m_sChallengeUser < 0
+			&& !CKnightsManager::CheckAlliance(pClan1 , pClan2))
+			return true;
+	}
+		return false;
+}
 void CGameServerDlg::CheckNationMonumentRewards()
 {
 	std::vector<uint16> deleted;
 
-	foreach_stlmap_nolock (itr, m_NationMonumentInformationArray)
+	foreach_stlmap (itr, m_NationMonumentInformationArray)
 	{
 		if (int32(UNIXTIME) - itr->second->RepawnedTime < NATION_MONUMENT_REWARD_SECOND)
 			continue;
@@ -2739,7 +4449,10 @@ void CGameServerDlg::CheckNationMonumentRewards()
 		CNpc *pNpc = GetNpcPtr(itr->second->sNid);
 
 		if (pNpc == nullptr)
+		{
+			deleted.push_back(itr->second->sSid);
 			continue;
+		}
 
 		uint16 nTrapNumber = pNpc->GetZoneID() == ZONE_KARUS ?  itr->second->sSid - LUFERSON_MONUMENT_SID : itr->second->sSid - ELMORAD_MONUMENT_SID;
 
@@ -2751,7 +4464,7 @@ void CGameServerDlg::CheckNationMonumentRewards()
 		{		
 			Unit * pTarget = g_pMain->GetUnitPtr(*itrx);
 
-			if(pTarget == nullptr || pTarget->isNPC())
+			if(pTarget == nullptr || pTarget->isNPC() || pTarget->GetNation() == pNpc->GetZoneID())
 				continue; 
 
 			if (pTarget->GetNation() == pNpc->GetNation() && pTarget->isInRangeSlow(pNpc,RANGE_50M))
@@ -2762,15 +4475,82 @@ void CGameServerDlg::CheckNationMonumentRewards()
 		{
 			Unit * pTarget = *itry;
 
-			if(pTarget == nullptr || pTarget->isNPC())
+			if(pTarget == nullptr || pTarget->isNPC() || pTarget->GetNation() == pNpc->GetZoneID())
 				continue;
 
+			g_pMain->m_lastBlessTime = UNIXTIME;
 			TO_USER(pTarget)->SendLoyaltyChange(nTrapNumber == 0 ? 200 : 50);
+			Announcement(DECLARE_NATION_REWARD_STATUS, Nation::ALL, itr->second->sSid, nullptr, pNpc);
+			ShowNpcEffect(itr->second->sNid,20100,pNpc->GetZoneID());
+		}
+	}
+
+	foreach (itr, deleted)
+		g_pMain->m_NationMonumentInformationArray.DeleteData(*itr);
+}
+
+void CGameServerDlg::BorderMonumentBosses()
+{
+	std::vector<uint16> deleted;
+	std::string sMonuKarus;
+	std::string sMonuHuman;
+
+	sMonuKarus = string_format("Karus has blessed the [Border War Monument].Bosses appears on Karus Base!");
+	sMonuHuman = string_format("ElMorad has blessed the [Border War Monument].Bosses appears on Human Base!");
+
+	foreach_stlmap (itr, m_NationMonumentInformationArray)
+	{
+		if (int32(UNIXTIME) - itr->second->RepawnedTime < 20)
+			continue;
+
+		CNpc *pNpc = GetNpcPtr(itr->second->sNid);
+
+		if (pNpc == nullptr)
+		{
+			deleted.push_back(itr->second->sSid);
+			continue;
 		}
 
-		Announcement(DECLARE_NATION_REWARD_STATUS, Nation::ALL, itr->second->sSid, nullptr, pNpc);
-		ShowNpcEffect(itr->second->sNid,20100,pNpc->GetZoneID());
-		deleted.push_back(itr->second->sSid);
+		std::vector<Unit *> distributed_member;
+		std::vector<uint16> unitList;
+		g_pMain->GetUnitListFromSurroundingRegions(pNpc, &unitList);
+
+		foreach (itrx, unitList)
+		{		
+			Unit * pTarget = g_pMain->GetUnitPtr(*itrx);
+
+			if(pTarget == nullptr || pTarget->isNPC() || pTarget->GetNation() != pNpc->GetNation())
+				continue;
+
+			if (pTarget->GetNation() == pNpc->GetNation() && pTarget->GetZoneID() == ZONE_BORDER_DEFENSE_WAR)
+				distributed_member.push_back(pTarget);
+		}
+
+		foreach (itry, distributed_member)
+		{
+			Unit * pTarget = *itry;
+
+			if(pTarget == nullptr || pTarget->isNPC() || pTarget->GetNation() != pNpc->GetNation())
+				continue;
+
+			TO_USER(pTarget)->SendLoyaltyChange(50);
+			ShowNpcEffect(itr->second->sNid,20100,pNpc->GetZoneID());
+		}
+
+		if (pNpc->GetNation() == KARUS)
+		{
+			g_pMain->m_lastBorderTime = UNIXTIME;
+			g_pMain->SendAnnouncement(sMonuKarus.c_str());
+			SpawnEventNpc(1321,true,pNpc->GetZoneID(),50,0,131,10,20,300);
+			SpawnEventNpc(1452,true,pNpc->GetZoneID(),55,0,131,5,10,300);
+		}
+		else
+		{
+			g_pMain->m_lastBorderTime = UNIXTIME;
+			g_pMain->SendAnnouncement(sMonuHuman.c_str());
+			SpawnEventNpc(1321,true,pNpc->GetZoneID(),207,0,131,10,20,300);
+			SpawnEventNpc(1452,true,pNpc->GetZoneID(),202,0,131,5,10,300);
+		}
 	}
 
 	foreach (itr, deleted)
@@ -2800,4 +4580,411 @@ void CGameServerDlg::WriteChatLogFile(string & logMessage)
 {
 	fwrite(logMessage.c_str(), logMessage.length(), 1, m_fpChat);
 	fflush(m_fpChat);
+}
+
+void CGameServerDlg::WriteGMLogFile(string & logMessage)
+{
+	fwrite(logMessage.c_str(), logMessage.length(), 1, m_fpGM);
+	fflush(m_fpGM);
+}
+
+void CGameServerDlg::WriteUpgradeLogFile(string & logMessage)
+{
+	fwrite(logMessage.c_str(), logMessage.length(), 1, m_upgradelog);
+	fflush(m_upgradelog);
+}
+
+void CGameServerDlg::WriteCheatLogFile(string & logMessage)
+{
+	fwrite(logMessage.c_str(), logMessage.length(), 1, m_fpCheat);
+	fflush(m_fpCheat);
+}
+
+bool CGameServerDlg::IsDuplicateItem(uint32 nItemID, uint64 nItemSerial)
+{
+	return false;
+
+	if (nItemID <= 0 || nItemSerial <= 0)
+		return false;
+
+	_USER_ITEM * pUserItem = g_pMain->m_UserItemArray.GetData(nItemID);
+
+	if (pUserItem == nullptr)
+		return false;
+
+	uint32 nDuplicateCount = 0;
+
+	foreach(itr, pUserItem->nItemSerial)
+	{
+		if (*itr == nItemSerial)
+			nDuplicateCount++;
+
+		if (nDuplicateCount > 1)
+			return true;
+	}
+
+	return false;
+}
+
+void CGameServerDlg::AddUserItem(uint32 nItemID, uint64 nItemSerial)
+{
+	if (nItemID <= 0 || nItemSerial <= 0)
+		return;
+
+	_USER_ITEM * pUserItem = g_pMain->m_UserItemArray.GetData(nItemID);
+
+	if (pUserItem == nullptr)
+	{
+		pUserItem = new _USER_ITEM;
+		pUserItem->nItemID = nItemID;
+		pUserItem->nItemSerial.push_back(nItemSerial);
+
+		if (!g_pMain->m_UserItemArray.PutData(pUserItem->nItemID,pUserItem))
+			delete pUserItem;
+	}
+	else
+		pUserItem->nItemSerial.push_back(nItemSerial);
+}
+
+void CGameServerDlg::ReloadKnightAndUserRanks()
+{
+	g_DBAgent.UpdateRanks();
+	
+	// Update clan grades/rankings
+	m_KnightsArray.DeleteAllData();
+	m_KnightsAllianceArray.DeleteAllData();
+	m_KnightsRatingArray[KARUS_ARRAY].DeleteAllData();
+	m_KnightsRatingArray[ELMORAD_ARRAY].DeleteAllData();
+	LoadAllKnights(true);
+	LoadAllKnightsUserData(true);
+	LoadKnightsAllianceTable(true);
+	LoadKnightsRankTable(false, true);
+	
+	// Update user rankings
+	CleanupUserRankings();
+	LoadUserRankings();
+}
+
+void CGameServerDlg::SetPlayerRankingRewards(uint16 ZoneID)
+{
+	SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+	foreach (itr, sessMap)
+	{
+		CUser * pUser = TO_USER(itr->second);
+		if (pUser == nullptr 
+			|| !pUser->isInGame()
+			|| pUser->isGM()
+			|| pUser->GetZoneID() != ZoneID)
+			continue;
+		
+		if (pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) > 0
+			&& pUser->GetPlayerRank(RANK_TYPE_PK_ZONE) <= 10)
+		{
+			if (m_nPlayerRankingLoyaltyReward > 0)
+				pUser->SendLoyaltyChange(m_nPlayerRankingLoyaltyReward, false, true, false);
+			if (m_nPlayerRankingKnightCashReward > 0)
+				g_DBAgent.UpdateAccountKnightCash(pUser->GetAccountName(), m_nPlayerRankingKnightCashReward);
+			/*
+			 string Cash = string_format ("Earned 1 Cash Kazandınız  ");
+			 Packet SecurityNotice(WIZ_CHAT, uint8(GENERAL_CHAT));//Sefa Şirin
+               g_pMain->SendNotice(Cash.c_str());
+			   */
+		}
+	}
+}
+void CGameServerDlg::TerminationFinish()
+{
+	if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_BORDER_DEFENCE_WAR) 
+		{
+			Packet bresult(WIZ_EVENT);
+			bresult << uint8(TEMPLE_EVENT_FINISH)
+					<< uint8(2)  << uint8(0)  
+					<< uint8(0)  << uint8(20) << uint32(0);
+		
+			Packet cresult(WIZ_EVENT);
+			cresult << uint8(TEMPLE_EVENT_FINISH)
+					<< uint8(2)  << uint8(0)  
+					<< uint8(1)  << uint8(20) << uint32(0);	
+
+			Packet dresult(WIZ_EVENT);
+			dresult << uint8(TEMPLE_EVENT_FINISH)
+					<< uint8(1)  << uint8(0)  
+					<< uint8(2)  << uint8(20) << uint32(0);	
+		
+		foreach_stlmap(itr, m_TempleEventUserArray) 
+		{
+			CUser * pUser = GetUserPtr(itr->second->m_socketID);
+			if (pUser == nullptr ||	!pUser->isInGame())
+				continue;
+			
+			if (g_pMain->pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] == pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] && g_pMain->pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] == pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()])
+				g_pMain->Send_Zone(&bresult,  ZONE_BORDER_DEFENSE_WAR, pUser, Nation::ALL, pUser->GetEventRoom());
+
+			if (pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] > pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] && pUser->GetNation() == KARUS) 
+				g_pMain->Send_Zone(&cresult,  ZONE_BORDER_DEFENSE_WAR, pUser, Nation::ALL, pUser->GetEventRoom());
+			
+			if (pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] > pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] && pUser->GetNation() == ELMORAD)		
+				g_pMain->Send_Zone(&dresult,  ZONE_BORDER_DEFENSE_WAR, pUser, Nation::ALL, pUser->GetEventRoom());
+				
+		}
+	}
+	else if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_CHAOS)
+	{		
+		Packet bresult(WIZ_EVENT);
+		bresult << uint8(TEMPLE_EVENT_FINISH) 
+				<< uint8(2)  << uint8(0)  
+				<< uint8(1)  << uint8(20) << uint32(0);	
+		
+		foreach_stlmap(itr, m_TempleEventUserArray) 
+		{
+			CUser * pUser = GetUserPtr(itr->second->m_socketID);
+
+			if (pUser == nullptr ||	!pUser->isInGame())
+				continue;
+
+			g_pMain->Send_Zone(&bresult,  ZONE_CHAOS_DUNGEON, pUser, Nation::ALL, pUser->GetEventRoom());
+		}
+	}
+	else if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_JURAD_MOUNTAIN) 
+	{		
+		Packet bresult(WIZ_EVENT);
+		bresult << uint8(TEMPLE_EVENT_FINISH)
+				<< uint8(2)  << uint8(0)  
+				<< uint8(0)  << uint8(20) << uint32(0);
+		
+		Packet cresult(WIZ_EVENT);
+		cresult << uint8(TEMPLE_EVENT_FINISH)
+				<< uint8(2)  << uint8(0)  
+				<< uint8(1)  << uint8(20) << uint32(0);	
+
+		Packet dresult(WIZ_EVENT);
+		dresult << uint8(TEMPLE_EVENT_FINISH)
+				<< uint8(1)  << uint8(0)  
+				<< uint8(2)  << uint8(20) << uint32(0);	
+		
+		foreach_stlmap(itr, m_TempleEventUserArray) 
+		{
+			CUser * pUser = GetUserPtr(itr->second->m_socketID);
+
+			if (pUser == nullptr ||	!pUser->isInGame())
+				continue;
+
+			if (g_pMain->pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] == pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] && g_pMain->pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] == pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()])
+				g_pMain->Send_Zone(&bresult,  ZONE_JURAD_MOUNTAIN, pUser, Nation::ALL, pUser->GetEventRoom());
+
+			if (pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] > pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] && pUser->GetNation() == KARUS) 
+				g_pMain->Send_Zone(&cresult,  ZONE_JURAD_MOUNTAIN, pUser, Nation::ALL, pUser->GetEventRoom());
+			
+			if (pTempleEvent.KarusDeathCount[pUser->GetEventRoom()] > pTempleEvent.ElmoDeathCount[pUser->GetEventRoom()] && pUser->GetNation() == ELMORAD)		
+				g_pMain->Send_Zone(&dresult,  ZONE_JURAD_MOUNTAIN, pUser, Nation::ALL, pUser->GetEventRoom());
+		}
+	} 
+}
+void CGameServerDlg::TerminitionTime(uint8 sNewZone,uint16 Time)
+{
+	if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_JURAD_MOUNTAIN)
+	{
+		Packet Inventory(WIZ_EVENT);
+		Inventory << uint8(1); // Inventory Kontrol.
+		Packet aresult(WIZ_SELECT_MSG);
+		aresult << uint16(0)   << uint8(7) 
+				<< uint32(0)   << uint32(0)
+				<< uint8(7)    << uint16(0) 
+				<< uint8(0)    << uint8(0x07)
+				<< Time << uint16(0);
+		
+		Packet bresult(WIZ_BIFROST);
+		bresult << uint8(0x05) << Time;
+		
+		Packet cresult(WIZ_EVENT);
+		cresult << uint8(0x03) << uint32(0)	  << uint32(0) << uint32(0x05008504) << uint8(0);
+
+		foreach_stlmap(itr, m_TempleEventUserArray) 
+		{
+			CUser * pUser = GetUserPtr(itr->second->m_socketID);
+			if (pUser == nullptr ||	!pUser->isInGame())
+				continue;
+
+			cresult << pUser->GetName();
+		}
+			cresult << uint32(0);
+
+		foreach_stlmap_nolock(itr, m_TempleEventUserArray) 
+		{
+			CUser * pUser = GetUserPtr(itr->second->m_socketID);
+			if (pUser == nullptr ||	!pUser->isInGame())
+				continue;
+			
+			pUser->Send(&Inventory);
+			pUser->Send(&aresult);
+			pUser->Send(&bresult);
+			pUser->SendToRegion(&cresult, nullptr, pUser->GetEventRoom());
+		}
+	}
+	else if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_BORDER_DEFENCE_WAR)
+	{
+		Packet Inventory(WIZ_EVENT);
+		Inventory << uint8(1); // Inventory Kontrol.
+
+		Packet aresult(WIZ_SELECT_MSG);
+		aresult << uint16(0)   << uint8(7) 
+				<< uint32(0)   << uint32(0)
+				<< uint8(8)    << uint16(0) 
+				<< uint8(0)    << uint8(0x07)
+				<< Time << uint16(0);
+		
+		Packet bresult(WIZ_BIFROST);
+		bresult << uint8(0x05) << Time;
+		
+		Packet cresult(WIZ_EVENT);
+		cresult << uint8(0x03) << uint32(0)	  << uint32(0) << uint32(0x05008504) << uint8(0);
+
+		foreach_stlmap(itr, m_TempleEventUserArray) 
+		{
+			CUser * pUser = GetUserPtr(itr->second->m_socketID);
+
+			if (pUser == nullptr ||	!pUser->isInGame())
+				continue;
+
+			cresult << pUser->GetName();
+		}
+			cresult << uint32(0);
+
+		foreach_stlmap_nolock(itr, m_TempleEventUserArray) 
+		{
+			CUser * pUser = GetUserPtr(itr->second->m_socketID);
+
+			if (pUser == nullptr ||	!pUser->isInGame())
+				continue;
+			
+			pUser->Send(&Inventory);
+			pUser->Send(&aresult);
+			pUser->Send(&bresult);
+			pUser->SendToRegion(&cresult,nullptr,pUser->GetEventRoom());
+		}
+	}
+	else if (pTempleEvent.ActiveEvent == TEMPLE_EVENT_CHAOS)
+	{
+		Packet aresult(WIZ_SELECT_MSG);
+		aresult << uint16(0)   << uint8(7)    
+				<< uint32(0)   << uint32(0) 
+				<< uint8(9)	   << uint16(0) 
+				<< uint8(0)    << uint8(0x18)
+				<< Time << uint16(0);
+		
+		Packet bresult(WIZ_BIFROST);
+		bresult << uint8(0x05) << Time;
+
+		foreach_stlmap (itr, m_TempleEventUserArray) 
+		{
+			CUser * pUser = GetUserPtr(itr->second->m_socketID);
+
+			if (pUser == nullptr ||	!pUser->isInGame())
+				continue;
+
+			pUser->Send(&aresult);
+			pUser->Send(&bresult);
+		}
+	}
+}
+void CGameServerDlg::UpdateSiege(int16 m_sCastleIndex, int16 m_sMasterKnights, int16 m_bySiegeType, int16 m_byWarDay, int16 m_byWarTime, int16 m_byWarMinute)
+{
+	g_DBAgent.UpdateSiege(m_sCastleIndex, m_sMasterKnights, m_bySiegeType, m_byWarDay, m_byWarTime, m_byWarMinute);
+}
+
+void CGameServerDlg::UpdateSiegeTax(uint8 Zone, int16 ZoneTarrif)
+{
+	g_DBAgent.UpdateSiegeTax(Zone, ZoneTarrif);
+}
+
+void CGameServerDlg::LunarGoldShells(){
+    SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+    foreach (itr, sessMap)
+    {
+        Packet result(0x53);
+        result << uint8(9) << uint8(1); //wiz_map_event , 9 gold shell , 1 giydir 
+
+
+        CUser * pUser = TO_USER(itr->second);
+        if (pUser == nullptr 
+            || !pUser->isInGame())
+            continue;
+    
+    pUser->Send(&result);
+
+
+    }
+}
+
+
+void CGameServerDlg::DeleteLunarGoldShells()
+{
+    SessionMap sessMap = g_pMain->m_socketMgr.GetActiveSessionMap();
+    foreach (itr, sessMap)
+    {
+        Packet result(0x53);
+        result << uint8(9) << uint8(0); //wiz_map_event , 9 gold shell , 0 sildir
+
+
+        CUser * pUser = TO_USER(itr->second);
+        if (pUser == nullptr 
+            || !pUser->isInGame())
+            continue;
+    
+        pUser->Send(&result);
+
+
+    }
+
+}
+
+void CGameServerDlg::color_c(char* buff,WORD color)
+{
+	HANDLE hstdin  = GetStdHandle( STD_INPUT_HANDLE  );
+	HANDLE hstdout = GetStdHandle( STD_OUTPUT_HANDLE );
+	
+
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	GetConsoleScreenBufferInfo( hstdout, &csbi );
+	SetConsoleTextAttribute( hstdout, color );
+	WriteConsole(hstdout,buff,strlen(buff),new DWORD,0);
+}
+
+void CGameServerDlg::SendConsoleFAIL()
+{
+	
+	color_c("[   ",FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN);
+	color_c("FAIL", FOREGROUND_RED+FOREGROUND_INTENSITY );
+	color_c("   ]\n",FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN);
+	
+}
+
+void CGameServerDlg::SendConsoleOK()
+{
+	
+	color_c("[    ",FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN);
+	color_c("OK", FOREGROUND_GREEN+FOREGROUND_INTENSITY );
+	color_c("    ]\n",FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN);
+	
+}
+
+void CGameServerDlg::Yaz(char* yazi,WORD color)
+{
+char data[105];
+memset(data,0x00,105);
+
+strcpy(data,yazi);
+
+int i2 = 0;
+i2 = 100 - strlen(yazi);
+
+for (int i = 0; i < i2; i++)
+sprintf(data,"%s ",data);
+
+if(color == 0)
+color_c((char*)(LPCTSTR)data,FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN );
+else
+color_c((char*)(LPCTSTR)data,color);
+
+
 }
